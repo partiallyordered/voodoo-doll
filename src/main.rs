@@ -134,6 +134,7 @@ async fn client_message(
 ) -> Result<()> {
     // TODO: consider replying with non-string messages with "go away"
     let msg = msg.to_str().map_err(|_| VoodooError::NonStringWebsocketMessageReceived)?;
+    println!("Message from client: {}", msg);
     let msg_de: protocol::ClientMessage = serde_json::from_str(msg)
         .map_err(|_| VoodooError::WebsocketMessageDeserializeFailed)?;
 
@@ -157,6 +158,7 @@ async fn client_message(
                     callback_type: participants::FspiopCallbackType::FspiopCallbackUrlTransferPut,
                     hostname: my_address.clone(),
                 },
+                // TODO: more robust mechanism for finding the "central ledger service" service
                 "http://centralledger-service",
             ).map_err(|_| VoodooError::InvalidUrl)?;
             let request = reqwest::Request::try_from(req_set_sender_transfer_fulfil)
@@ -171,6 +173,7 @@ async fn client_message(
                     callback_type: participants::FspiopCallbackType::FspiopCallbackUrlTransferPost,
                     hostname: my_address,
                 },
+                // TODO: more robust mechanism for finding the "central ledger service" service
                 "http://centralledger-service",
             ).map_err(|_| VoodooError::InvalidUrl)?;
             let request = reqwest::Request::try_from(req_set_sender_transfer_fulfil)
@@ -187,7 +190,8 @@ async fn client_message(
                     transfer_message.currency,
                     Some(transfer_message.transfer_id),
                 ),
-                "http://ml-api-adapter",
+                // TODO: more robust mechanism for finding the "ml api adapter service" service
+                "http://ml-api-adapter-service",
             ).map_err(|_| VoodooError::InvalidUrl)?;
             let request = reqwest::Request::try_from(req_post_transfer)
                 .map_err(|_| VoodooError::RequestConversionError)?;
