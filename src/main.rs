@@ -205,7 +205,7 @@ async fn client_message(
             // Take over both the sender's and recipient's transfers error endpoint
             let req_set_sender_transfer_error = participants::to_request(
                 participants::PostCallbackUrl {
-                    name: transfer_message.msg_recipient.clone(),
+                    name: transfer_message.msg_sender.clone(),
                     callback_type: participants::FspiopCallbackType::FspiopCallbackUrlTransferError,
                     hostname: my_address.clone(),
                 },
