@@ -72,7 +72,8 @@ async fn main() {
         .and(warp::path::param::<transfer::TransferId>())
         .and(warp::body::json())
         .map(|transfer_id, transfer_fulfil: transfer::TransferFulfilRequestBody| {
-            format!("{} | {:?}", transfer_id, transfer_fulfil)
+            println!("{} | {:?}", transfer_id, transfer_fulfil);
+            ""
         });
 
     // POST /transfers
@@ -80,7 +81,8 @@ async fn main() {
         .and(warp::path("transfers"))
         .and(warp::body::json())
         .map(|transfer_prepare: transfer::TransferPrepareRequestBody| {
-            format!("{:?}", transfer_prepare)
+            println!("{:?}", transfer_prepare);
+            ""
         });
 
     let routes = voodoo.or(put_transfers).or(post_transfers);
