@@ -85,7 +85,22 @@ async fn main() {
             ""
         });
 
-    let routes = voodoo.or(put_transfers).or(post_transfers);
+    let put_transfers_error = warp::put()
+        .and(warp::path("transfers"))
+        .and(warp::path::param::<transfer::TransferId>())
+        .and(warp::path("error"))
+        .and(warp::body::json())
+        .map(|transfer_id, transfer_prepare: transfer::TransferPrepareRequestBody| {
+            println!("Error {} | {:?}", transfer_id, transfer_prepare);
+            ""
+        });
+
+    // TODO: it's pretty crucial to handle /transfers/error/$id, for example if there are
+    // insufficient funds. It should be pretty easy to test this: process funds out of the
+    // settlement account such that the settlement balance is below the position balance, then run
+    // a transfer.
+
+    let routes = voodoo.or(put_transfers).or(post_transfers).or(put_transfers_error);
 
     warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
 }
@@ -153,6 +168,10 @@ async fn client_message(
         protocol::ClientMessage::Transfer(transfer_message) => {
             use std::convert::TryFrom;
 
+            // TODO: a lot of scope for deduplication here. The best thing to do might be to
+            // temporarily intercept all FSPIOP messages for the relevant participants, and restore
+            // them afterward.
+
             // Take over the sender's PUT /transfers endpoint
             let req_set_sender_transfer_fulfil = participants::to_request(
                 participants::PostCallbackUrl {
@@ -169,16 +188,45 @@ async fn client_message(
                 .map_err(|e| VoodooError::FailedToSetParticipantEndpoint(e.to_string()))?;
 
             // Take over the recipient's POST /transfers endpoint
-            let req_set_sender_transfer_fulfil = participants::to_request(
+            let req_set_recipient_transfer_fulfil = participants::to_request(
                 participants::PostCallbackUrl {
                     name: transfer_message.msg_recipient.clone(),
                     callback_type: participants::FspiopCallbackType::FspiopCallbackUrlTransferPost,
-                    hostname: my_address,
+                    hostname: my_address.clone(),
                 },
                 // TODO: more robust mechanism for finding the "central ledger service" service
                 "http://centralledger-service",
             ).map_err(|_| VoodooError::InvalidUrl)?;
-            let request = reqwest::Request::try_from(req_set_sender_transfer_fulfil)
+            let request = reqwest::Request::try_from(req_set_recipient_transfer_fulfil)
+                .map_err(|_| VoodooError::RequestConversionError)?;
+            http_client.execute(request).await
+                .map_err(|e| VoodooError::FailedToSetParticipantEndpoint(e.to_string()))?;
+
+            // Take over both the sender's and recipient's transfers error endpoint
+            let req_set_sender_transfer_error = participants::to_request(
+                participants::PostCallbackUrl {
+                    name: transfer_message.msg_recipient.clone(),
+                    callback_type: participants::FspiopCallbackType::FspiopCallbackUrlTransferError,
+                    hostname: my_address.clone(),
+                },
+                // TODO: more robust mechanism for finding the "central ledger service" service
+                "http://centralledger-service",
+            ).map_err(|_| VoodooError::InvalidUrl)?;
+            let request = reqwest::Request::try_from(req_set_sender_transfer_error)
+                .map_err(|_| VoodooError::RequestConversionError)?;
+            http_client.execute(request).await
+                .map_err(|e| VoodooError::FailedToSetParticipantEndpoint(e.to_string()))?;
+
+            let req_set_recipient_transfer_error = participants::to_request(
+                participants::PostCallbackUrl {
+                    name: transfer_message.msg_recipient.clone(),
+                    callback_type: participants::FspiopCallbackType::FspiopCallbackUrlTransferError,
+                    hostname: my_address.clone(),
+                },
+                // TODO: more robust mechanism for finding the "central ledger service" service
+                "http://centralledger-service",
+            ).map_err(|_| VoodooError::InvalidUrl)?;
+            let request = reqwest::Request::try_from(req_set_recipient_transfer_error)
                 .map_err(|_| VoodooError::RequestConversionError)?;
             http_client.execute(request).await
                 .map_err(|e| VoodooError::FailedToSetParticipantEndpoint(e.to_string()))?;
