@@ -14,11 +14,11 @@
 # - looks like you'll need to manually make the published image public by visiting:
 #   https://github.com/orgs/{{ your organisation }}/packages
 
-# TODO: create a tag/release with the version based on the version in package.json every time a
-# merge is made to master? Prevent any merges to master without a code change? (That's probably
-# tricky- what to do about documentation changes etc.? Perhaps build the container image, see if
-# the checksum is the same as the existing one, and prevent pushes to master that change the
-# container checksum without changing the package.json version?).
+# TODO: create a tag/release with the version based on the version in Cargo.toml every time a merge
+# is made to master? Prevent any merges to master without a code change? (That's probably tricky-
+# what to do about documentation changes etc.? Perhaps build the container image, see if the
+# checksum is the same as the existing one, and prevent pushes to master that change the container
+# checksum without changing the Cargo.toml version?).
 
 name: Publish image
 

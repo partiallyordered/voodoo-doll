@@ -139,8 +139,10 @@ async fn client_message(
 
     use mojaloop_api::central_ledger::participants;
 
-    // TODO: Get this at the start and panic if it fails. If it fails once, it will always fail.
-    // TODO: Assert hostname is valid URI using url::Uri::parse
+    // TODO: Get this at startup and panic if it fails. If it fails once, it will always fail.
+    // TODO: Assert hostname is valid URI using url::Uri::parse?
+    // TODO: We use status.podIP, but we might better use status.podIPs (or _maybe_, but probably
+    //       not, status.hostIP)
     let my_ip = std::env::var("HOST_IP").map_err(|_| VoodooError::HostIpNotFound)?;
     let my_address = format!("{}:{}", my_ip, 3030);
 
