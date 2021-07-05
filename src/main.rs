@@ -145,7 +145,7 @@ async fn client_message(
     // TODO: We use status.podIP, but we might better use status.podIPs (or _maybe_, but probably
     //       not, status.hostIP)
     let my_ip = std::env::var("HOST_IP").map_err(|_| VoodooError::HostIpNotFound)?;
-    let my_address = format!("{}:{}", my_ip, 3030);
+    let my_address = format!("http://{}:{}", my_ip, 3030);
 
     match msg_de {
         protocol::ClientMessage::Transfer(transfer_message) => {
