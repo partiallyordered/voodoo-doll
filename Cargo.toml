@@ -1,6 +1,6 @@
 [package]
 name = "voodoo-doll"
-version = "0.1.7"
+version = "0.1.8"
 authors = ["msk- <mattkingston@gmail.com>"]
 edition = "2018"
 
@@ -15,12 +15,12 @@ tokio-stream = { version = "0.1.6" }
 hyper = "0.14"
 warp = "0.3"
 futures = "0.3"
-fspiox-api = { git = "https://github.com/partiallyordered/fspiox-api", rev = "e0a48a0f703a6a6ece098b3bc93a70cf33e505b0", features = ["fsp_http"] }
+fspiox-api = { git = "https://github.com/partiallyordered/fspiox-api", rev = "9d7be07ead011454b53d66cb5ce910421281b0e3", features = ["fsp_http"] }
 # fspiox-api = { path = "/home/msk/projects/github.com/msk-/fspiox-api/" ,features = ["fsp_http"] }
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
-mojaloop-api = { git = "https://github.com/partiallyordered/mojaloop-api", rev = "08a89f17f6d5c6165d70277e1e5cea36b4be9b57" }
+mojaloop-api = { git = "https://github.com/partiallyordered/mojaloop-api", rev = "c177f7ac3fe3c969f0270f512ff6962ef9d9e63d" }
 # mojaloop-api = { path = "/home/msk/projects/github.com/msk-/mojaloop-api/" }
 gethostname = "0.2"
 thiserror = "1.0"

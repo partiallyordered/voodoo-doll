@@ -23,6 +23,13 @@ pub struct TransferCompleteMessage {
 }
 
 #[derive(Serialize, Deserialize)]
+pub struct TransferErrorMessage {
+    pub id: transfer::TransferId,
+    pub response: common::ErrorResponse,
+}
+
+#[derive(Serialize, Deserialize)]
 pub enum ServerMessage {
     TransferComplete(TransferCompleteMessage),
+    TransferError(TransferErrorMessage),
 }

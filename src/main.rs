@@ -41,7 +41,7 @@ static CLIENT_ID_COUNTER: AtomicUsize = AtomicUsize::new(1);
 type ClientId = usize;
 type Clients = Arc<RwLock<HashMap<ClientId, mpsc::UnboundedSender<std::result::Result<Message, warp::Error>>>>>;
 
-#[derive(Hash, PartialEq, Eq)]
+#[derive(Hash, PartialEq, Eq, Debug)]
 enum FspiopMessageId {
     TransferId(transfer::TransferId),
 }
@@ -59,6 +59,8 @@ enum FspiopError {
 }
 impl warp::reject::Reject for FspiopError {}
 
+// We implement a json body handler here because warp::body::json() also enforces the content-type
+// header to equal application/json. This doesn't work for us.
 fn json_body<T: serde::de::DeserializeOwned + Send>() -> impl warp::Filter<Extract = (T,), Error = warp::Rejection> + Copy {
     warp::body::bytes().and_then(|buf: hyper::body::Bytes| async move {
         serde_json::from_slice::<T>(&buf)
@@ -111,14 +113,13 @@ async fn handle_rejection(err: warp::reject::Rejection) -> std::result::Result<i
 async fn main() {
     let clients = Clients::default();
     let in_flight_msgs = InFlightFspiopMessages::default();
-    let clients = warp::any().map(move || clients.clone());
-    let in_flight_msgs = warp::any().map(move || in_flight_msgs.clone());
 
     // GET /voodoo -> websocket upgrade
     let voodoo = warp::path("voodoo")
         .and(warp::ws())
-        .and(clients)
-        .and(in_flight_msgs)
+        // TODO: is there a tidier way to do this?
+        .and(warp::any().map({ let clients = clients.clone(); move || clients.clone()}))
+        .and(warp::any().map({ let in_flight_msgs = in_flight_msgs.clone(); move || in_flight_msgs.clone() }))
         .map(|ws: warp::ws::Ws, clients, in_flight_msgs| {
             ws.on_upgrade(move |socket| ws_connection_handler(socket, clients, in_flight_msgs))
         });
@@ -129,9 +130,11 @@ async fn main() {
         .and(warp::path::param::<transfer::TransferId>())
         .and(warp::path::end())
         .and(json_body())
-        .map(|transfer_id, transfer_fulfil: transfer::TransferFulfilRequestBody| {
-            println!("{} | {:?}", transfer_id, transfer_fulfil);
-            ""
+        .and_then({
+            let clients = clients.clone();
+            let in_flight_msgs = in_flight_msgs.clone();
+            move |transfer_id, transfer_fulfil: transfer::TransferFulfilRequestBody|
+                handle_put_transfers(transfer_id, transfer_fulfil, in_flight_msgs.clone(), clients.clone())
         });
 
     // POST /transfers
@@ -139,9 +142,13 @@ async fn main() {
         .and(warp::path("transfers"))
         .and(warp::path::end())
         .and(json_body())
-        .map(|transfer_prepare: transfer::TransferPrepareRequestBody| {
-            println!("{:?}", transfer_prepare);
-            ""
+        // TODO: does this create a new client per-request? I guess so? Avoid this..
+        .and(warp::any().map(|| reqwest::Client::new()))
+        .and_then({
+            let clients = clients.clone();
+            let in_flight_msgs = in_flight_msgs.clone();
+            move |transfer_prepare: transfer::TransferPrepareRequestBody, http_client|
+                handle_post_transfers(transfer_prepare, http_client, in_flight_msgs.clone(), clients.clone())
         });
 
     // PUT /transfers/{id}/error
@@ -151,9 +158,11 @@ async fn main() {
         .and(warp::path("error"))
         .and(warp::path::end())
         .and(json_body())
-        .map(|transfer_id, transfer_error: fspiox_api::common::ErrorResponse| {
-            println!("Error {} | {:?}", transfer_id, transfer_error);
-            ""
+        .and_then({
+            let clients = clients.clone();
+            let in_flight_msgs = in_flight_msgs.clone();
+            move |transfer_id: transfer::TransferId, transfer_error: fspiox_api::common::ErrorResponse|
+                handle_put_transfers_error(transfer_id, transfer_error, in_flight_msgs.clone(), clients.clone())
         });
 
     let routes = voodoo
@@ -163,6 +172,89 @@ async fn main() {
         .recover(handle_rejection);
 
     warp::serve(routes).run(([0, 0, 0, 0], 3030)).await;
+}
+
+async fn handle_put_transfers(
+    transfer_id: transfer::TransferId,
+    transfer_fulfil: transfer::TransferFulfilRequestBody,
+    in_flight_msgs: InFlightFspiopMessages,
+    clients: Clients,
+) -> std::result::Result<impl warp::Reply, std::convert::Infallible> {
+    match in_flight_msgs.read().await.get(&FspiopMessageId::TransferId(transfer_id)) {
+        // TODO: assert that the transfer ID in the URI matches the transfer ID in the payload?
+        Some(client_id) => {
+            println!("Transfer fulfil received | {:?}", transfer_fulfil);
+            if let Some(client_ws_tx) = clients.write().await.get_mut(client_id) {
+                let msg_text = serde_json::to_string(&protocol::ServerMessage::TransferComplete(
+                    protocol::TransferCompleteMessage {
+                        id: transfer_id,
+                    }
+                )).unwrap();
+                if let Err(_disconnected) = client_ws_tx.send(Ok(Message::text(msg_text))) {
+                    // Disconnect handled elsewhere
+                    println!("Client disconnected, failed to send");
+                }
+            } else {
+                println!("No client found for transfer");
+            }
+        }
+        None => println!("Received unrecognised FSPIOP transfer prepare message")
+    }
+    Ok("")
+}
+
+async fn handle_put_transfers_error(
+    transfer_id: transfer::TransferId,
+    transfer_error: fspiox_api::common::ErrorResponse,
+    in_flight_msgs: InFlightFspiopMessages,
+    clients: Clients,
+) -> std::result::Result<impl warp::Reply, std::convert::Infallible> {
+    match in_flight_msgs.read().await.get(&FspiopMessageId::TransferId(transfer_id)) {
+        // TODO: assert that the transfer ID in the URI matches the transfer ID in the payload?
+        Some(client_id) => {
+            println!("Transfer error received {} | {:?}", transfer_id, transfer_error);
+            if let Some(client_ws_tx) = clients.write().await.get_mut(client_id) {
+                let msg_text = serde_json::to_string(&protocol::ServerMessage::TransferError(
+                    protocol::TransferErrorMessage {
+                        id: transfer_id,
+                        response: transfer_error,
+                    }
+                )).unwrap();
+                if let Err(_disconnected) = client_ws_tx.send(Ok(Message::text(msg_text))) {
+                    // Disconnect handled elsewhere
+                    println!("Client disconnected, failed to send");
+                }
+            } else {
+                println!("No client found for transfer");
+            }
+        }
+        None => println!(
+            "Received unrecognised FSPIOP transfer error message. ID: {:?}",
+            transfer_id,
+        )
+    }
+    Ok("")
+}
+
+async fn handle_post_transfers(
+    transfer_prepare: transfer::TransferPrepareRequestBody,
+    http_client: reqwest::Client,
+    in_flight_msgs: InFlightFspiopMessages,
+    clients: Clients,
+) -> std::result::Result<impl warp::Reply, std::convert::Infallible> {
+    use std::convert::TryFrom;
+    let req_post_transfer = to_http_request(
+        build_transfer_fulfil(
+            transfer_prepare.payer_fsp,
+            transfer_prepare.payee_fsp,
+            transfer_prepare.transfer_id,
+        ),
+        // TODO: more robust mechanism for finding the "ml api adapter service" service
+        "http://ml-api-adapter-service",
+    ).unwrap();
+    let request = reqwest::Request::try_from(req_post_transfer).unwrap();
+    http_client.execute(request).await.unwrap();
+    Ok("")
 }
 
 async fn ws_connection_handler(ws: WebSocket, clients: Clients, in_flight_msgs: InFlightFspiopMessages) {
@@ -227,6 +319,12 @@ async fn client_message(
     match msg_de {
         protocol::ClientMessage::Transfer(transfer_message) => {
             use std::convert::TryFrom;
+
+            // TODO: check all transfer preconditions (optionally)? I.e.:
+            //       - hub has correct currency accounts
+            //       - 
+            //       - sender exists, has correct currency accounts, has sufficient liquidity
+            //       - recipient exists, has correct currency accounts
 
             // TODO: a lot of scope for deduplication here. The best thing to do might be to
             // temporarily intercept all FSPIOP messages for the relevant participants, and restore
