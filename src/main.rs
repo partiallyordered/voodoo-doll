@@ -50,6 +50,63 @@ enum FspiopMessageId {
 /// requested them.
 type InFlightFspiopMessages = Arc<RwLock<HashMap<FspiopMessageId, ClientId>>>;
 
+// TODO: implement this properly to return an actual FSPIOP error. Or perhaps add warp-specific
+// return value implementations to the fspiox-api FspiopError.
+#[derive(Error, Debug)]
+enum FspiopError {
+    #[error("Request body couldn't be deserialized: {0}")]
+    MalformedRequestBody(String),
+}
+impl warp::reject::Reject for FspiopError {}
+
+fn json_body<T: serde::de::DeserializeOwned + Send>() -> impl warp::Filter<Extract = (T,), Error = warp::Rejection> + Copy {
+    warp::body::bytes().and_then(|buf: hyper::body::Bytes| async move {
+        serde_json::from_slice::<T>(&buf)
+            // .map_err(|e| warp::reject::known(warp::filters::body::BodyDeserializeError { cause: e }))
+            .map_err(|e| warp::reject::custom(FspiopError::MalformedRequestBody(e.to_string())))
+    })
+}
+
+async fn handle_rejection(err: warp::reject::Rejection) -> std::result::Result<impl warp::reply::Reply, std::convert::Infallible> {
+    use warp::http::StatusCode;
+    let code;
+    let message;
+
+    if err.is_not_found() {
+        code = StatusCode::NOT_FOUND;
+        message = "NOT_FOUND";
+    } else if let Some(e) = err.find::<FspiopError>() {
+        match e {
+            FspiopError::MalformedRequestBody(s) => {
+                code = StatusCode::BAD_REQUEST;
+                message = s;
+            }
+        }
+    } else if let Some(_) = err.find::<warp::reject::MethodNotAllowed>() {
+        code = StatusCode::METHOD_NOT_ALLOWED;
+        message = "METHOD_NOT_ALLOWED";
+    } else {
+        // TODO: we only _really_ want to handle FspiopError here, and nothing else. Can we fall back to
+        // the default rejection handler for everything that's not an FspiopError?
+        println!("unhandled rejection: {:?}", err);
+        code = StatusCode::INTERNAL_SERVER_ERROR;
+        message = "UNHANDLED_REJECTION";
+    }
+
+    #[derive(serde::Serialize)]
+    struct ErrorMessage {
+        code: u16,
+        message: String,
+    }
+
+    let json = warp::reply::json(&ErrorMessage {
+        code: code.as_u16(),
+        message: message.into(),
+    });
+
+    Ok(warp::reply::with_status(json, code))
+}
+
 #[tokio::main]
 async fn main() {
     let clients = Clients::default();
@@ -70,7 +127,8 @@ async fn main() {
     let put_transfers = warp::put()
         .and(warp::path("transfers"))
         .and(warp::path::param::<transfer::TransferId>())
-        .and(warp::body::json())
+        .and(warp::path::end())
+        .and(json_body())
         .map(|transfer_id, transfer_fulfil: transfer::TransferFulfilRequestBody| {
             println!("{} | {:?}", transfer_id, transfer_fulfil);
             ""
@@ -79,28 +137,30 @@ async fn main() {
     // POST /transfers
     let post_transfers = warp::post()
         .and(warp::path("transfers"))
-        .and(warp::body::json())
+        .and(warp::path::end())
+        .and(json_body())
         .map(|transfer_prepare: transfer::TransferPrepareRequestBody| {
             println!("{:?}", transfer_prepare);
             ""
         });
 
+    // PUT /transfers/{id}/error
     let put_transfers_error = warp::put()
         .and(warp::path("transfers"))
         .and(warp::path::param::<transfer::TransferId>())
         .and(warp::path("error"))
-        .and(warp::body::json())
-        .map(|transfer_id, transfer_prepare: transfer::TransferPrepareRequestBody| {
-            println!("Error {} | {:?}", transfer_id, transfer_prepare);
+        .and(warp::path::end())
+        .and(json_body())
+        .map(|transfer_id, transfer_error: fspiox_api::common::ErrorResponse| {
+            println!("Error {} | {:?}", transfer_id, transfer_error);
             ""
         });
 
-    // TODO: it's pretty crucial to handle /transfers/error/$id, for example if there are
-    // insufficient funds. It should be pretty easy to test this: process funds out of the
-    // settlement account such that the settlement balance is below the position balance, then run
-    // a transfer.
-
-    let routes = voodoo.or(put_transfers).or(post_transfers).or(put_transfers_error);
+    let routes = voodoo
+        .or(put_transfers)
+        .or(post_transfers)
+        .or(put_transfers_error)
+        .recover(handle_rejection);
 
     warp::serve(routes).run(([0, 0, 0, 0], 3030)).await;
 }

@@ -1,6 +1,6 @@
 [package]
 name = "voodoo-doll"
-version = "0.1.6"
+version = "0.1.7"
 authors = ["msk- <mattkingston@gmail.com>"]
 edition = "2018"
 
@@ -12,6 +12,7 @@ path = "src/lib.rs"
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 tokio-stream = { version = "0.1.6" }
+hyper = "0.14"
 warp = "0.3"
 futures = "0.3"
 fspiox-api = { git = "https://github.com/partiallyordered/fspiox-api", rev = "e0a48a0f703a6a6ece098b3bc93a70cf33e505b0", features = ["fsp_http"] }
