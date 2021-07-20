@@ -127,6 +127,7 @@ async fn main() {
     // PUT /transfers
     let put_transfers = warp::put()
         .and(warp::path("transfers"))
+        // TODO: .and(warp::path!("transfers" / transfer::TransferId))
         .and(warp::path::param::<transfer::TransferId>())
         .and(warp::path::end())
         .and(json_body())
@@ -243,6 +244,7 @@ async fn handle_post_transfers(
     clients: Clients,
 ) -> std::result::Result<impl warp::Reply, std::convert::Infallible> {
     use std::convert::TryFrom;
+    println!("Received POST /transfer {:?}", transfer_prepare);
     let req_post_transfer = to_http_request(
         build_transfer_fulfil(
             transfer_prepare.payer_fsp,
@@ -252,8 +254,10 @@ async fn handle_post_transfers(
         // TODO: more robust mechanism for finding the "ml api adapter service" service
         "http://ml-api-adapter-service",
     ).unwrap();
+    println!("Sending PUT /transfer {:?}", req_post_transfer);
     let request = reqwest::Request::try_from(req_post_transfer).unwrap();
     http_client.execute(request).await.unwrap();
+    println!("Sent PUT /transfer with ID {}", transfer_prepare.transfer_id);
     Ok("")
 }
 
@@ -326,68 +330,28 @@ async fn client_message(
             //       - sender exists, has correct currency accounts, has sufficient liquidity
             //       - recipient exists, has correct currency accounts
 
-            // TODO: a lot of scope for deduplication here. The best thing to do might be to
-            // temporarily intercept all FSPIOP messages for the relevant participants, and restore
-            // them afterward.
-
-            // Take over the sender's PUT /transfers endpoint
-            let req_set_sender_transfer_fulfil = participants::to_request(
-                participants::PostCallbackUrl {
-                    name: transfer_message.msg_sender.clone(),
-                    callback_type: participants::FspiopCallbackType::FspiopCallbackUrlTransferPut,
-                    hostname: my_address.clone(),
-                },
-                // TODO: more robust mechanism for finding the "central ledger service" service
-                "http://centralledger-service",
-            ).map_err(|_| VoodooError::InvalidUrl)?;
-            let request = reqwest::Request::try_from(req_set_sender_transfer_fulfil)
-                .map_err(|_| VoodooError::RequestConversionError)?;
-            http_client.execute(request).await
-                .map_err(|e| VoodooError::FailedToSetParticipantEndpoint(e.to_string()))?;
-
-            // Take over the recipient's POST /transfers endpoint
-            let req_set_recipient_transfer_fulfil = participants::to_request(
-                participants::PostCallbackUrl {
-                    name: transfer_message.msg_recipient.clone(),
-                    callback_type: participants::FspiopCallbackType::FspiopCallbackUrlTransferPost,
-                    hostname: my_address.clone(),
-                },
-                // TODO: more robust mechanism for finding the "central ledger service" service
-                "http://centralledger-service",
-            ).map_err(|_| VoodooError::InvalidUrl)?;
-            let request = reqwest::Request::try_from(req_set_recipient_transfer_fulfil)
-                .map_err(|_| VoodooError::RequestConversionError)?;
-            http_client.execute(request).await
-                .map_err(|e| VoodooError::FailedToSetParticipantEndpoint(e.to_string()))?;
-
-            // Take over both the sender's and recipient's transfers error endpoint
-            let req_set_sender_transfer_error = participants::to_request(
-                participants::PostCallbackUrl {
-                    name: transfer_message.msg_sender.clone(),
-                    callback_type: participants::FspiopCallbackType::FspiopCallbackUrlTransferError,
-                    hostname: my_address.clone(),
-                },
-                // TODO: more robust mechanism for finding the "central ledger service" service
-                "http://centralledger-service",
-            ).map_err(|_| VoodooError::InvalidUrl)?;
-            let request = reqwest::Request::try_from(req_set_sender_transfer_error)
-                .map_err(|_| VoodooError::RequestConversionError)?;
-            http_client.execute(request).await
-                .map_err(|e| VoodooError::FailedToSetParticipantEndpoint(e.to_string()))?;
-
-            let req_set_recipient_transfer_error = participants::to_request(
-                participants::PostCallbackUrl {
-                    name: transfer_message.msg_recipient.clone(),
-                    callback_type: participants::FspiopCallbackType::FspiopCallbackUrlTransferError,
-                    hostname: my_address.clone(),
-                },
-                // TODO: more robust mechanism for finding the "central ledger service" service
-                "http://centralledger-service",
-            ).map_err(|_| VoodooError::InvalidUrl)?;
-            let request = reqwest::Request::try_from(req_set_recipient_transfer_error)
-                .map_err(|_| VoodooError::RequestConversionError)?;
-            http_client.execute(request).await
-                .map_err(|e| VoodooError::FailedToSetParticipantEndpoint(e.to_string()))?;
+            // TODO: restore FSP endpoints afterward
+            for participant in [&transfer_message.msg_recipient, &transfer_message.msg_sender].iter() {
+                println!("Overriding endpoints for {}", participant);
+                use strum::IntoEnumIterator;
+                for callback_type in participants::FspiopCallbackType::iter() {
+                    let request = participants::to_request(
+                        participants::PostCallbackUrl {
+                            name: (*participant).clone(),
+                            callback_type,
+                            // TODO: strip trailing slash
+                            hostname: my_address.clone(),
+                        },
+                        // TODO: more robust mechanism for finding the "central ledger service" service
+                        "http://centralledger-service",
+                    ).map_err(|_| VoodooError::InvalidUrl)?;
+                    let request = reqwest::Request::try_from(request)
+                        .map_err(|_| VoodooError::RequestConversionError)?;
+                    http_client.execute(request).await
+                        .map_err(|e| VoodooError::FailedToSetParticipantEndpoint(e.to_string()))?;
+                    println!("Updated {:?} endpoint to {}.", callback_type, my_address.clone());
+                }
+            }
 
             // Send the transfer prepare, we'll receive it on our POST /transfers soon enough..
             let req_post_transfer = to_http_request(
@@ -401,11 +365,13 @@ async fn client_message(
                 // TODO: more robust mechanism for finding the "ml api adapter service" service
                 "http://ml-api-adapter-service",
             ).map_err(|_| VoodooError::InvalidUrl)?;
+            println!("Sending POST /transfer {:?}", req_post_transfer);
             let request = reqwest::Request::try_from(req_post_transfer)
                 .map_err(|_| VoodooError::RequestConversionError)?;
             http_client.execute(request).await
                 .map_err(|e| VoodooError::FailedToSetParticipantEndpoint(e.to_string()))?;
 
+            println!("Storing in flight message {}", transfer_message.transfer_id);
             in_flight_msgs.write().await.insert(
                 FspiopMessageId::TransferId(transfer_message.transfer_id),
                 client_id
