@@ -321,61 +321,65 @@ async fn client_message(
     let my_address = format!("http://{}:{}", my_ip, 3030);
 
     match msg_de {
-        protocol::ClientMessage::Transfer(transfer_message) => {
+        protocol::ClientMessage::Transfers(transfers_message) => {
             use std::convert::TryFrom;
 
-            // TODO: check all transfer preconditions (optionally)? I.e.:
-            //       - hub has correct currency accounts
-            //       - 
-            //       - sender exists, has correct currency accounts, has sufficient liquidity
-            //       - recipient exists, has correct currency accounts
+            for transfer in transfers_message.iter() {
 
-            // TODO: restore FSP endpoints afterward
-            for participant in [&transfer_message.msg_recipient, &transfer_message.msg_sender].iter() {
-                println!("Overriding endpoints for {}", participant);
-                use strum::IntoEnumIterator;
-                for callback_type in participants::FspiopCallbackType::iter() {
-                    let request = participants::to_request(
-                        participants::PostCallbackUrl {
-                            name: (*participant).clone(),
-                            callback_type,
-                            // TODO: strip trailing slash
-                            hostname: my_address.clone(),
-                        },
-                        // TODO: more robust mechanism for finding the "central ledger service" service
-                        "http://centralledger-service",
-                    ).map_err(|_| VoodooError::InvalidUrl)?;
-                    let request = reqwest::Request::try_from(request)
-                        .map_err(|_| VoodooError::RequestConversionError)?;
-                    http_client.execute(request).await
-                        .map_err(|e| VoodooError::FailedToSetParticipantEndpoint(e.to_string()))?;
-                    println!("Updated {:?} endpoint to {}.", callback_type, my_address.clone());
+                // TODO: check all transfer preconditions (optionally)? I.e.:
+                //       - hub has correct currency accounts
+                //       - 
+                //       - sender exists, has correct currency accounts, has sufficient liquidity
+                //       - recipient exists, has correct currency accounts
+
+                // TODO: restore FSP endpoints afterward
+                for participant in [&transfer.msg_recipient, &transfer.msg_sender].iter() {
+                    println!("Overriding endpoints for {}", participant);
+                    use strum::IntoEnumIterator;
+                    for callback_type in participants::FspiopCallbackType::iter() {
+                        let request = participants::to_request(
+                            participants::PostCallbackUrl {
+                                name: (*participant).clone(),
+                                callback_type,
+                                // TODO: strip trailing slash
+                                hostname: my_address.clone(),
+                            },
+                            // TODO: more robust mechanism for finding the "central ledger service" service
+                            "http://centralledger-service",
+                        ).map_err(|_| VoodooError::InvalidUrl)?;
+                        let request = reqwest::Request::try_from(request)
+                            .map_err(|_| VoodooError::RequestConversionError)?;
+                        http_client.execute(request).await
+                            .map_err(|e| VoodooError::FailedToSetParticipantEndpoint(e.to_string()))?;
+                        println!("Updated {:?} endpoint to {}.", callback_type, my_address.clone());
+                    }
                 }
+
+                // Send the transfer prepare, we'll receive it on our POST /transfers soon enough..
+                let req_post_transfer = to_http_request(
+                    build_transfer_prepare(
+                        transfer.msg_sender.clone(),
+                        transfer.msg_recipient.clone(),
+                        transfer.amount,
+                        transfer.currency,
+                        Some(transfer.transfer_id),
+                    ),
+                    // TODO: more robust mechanism for finding the "ml api adapter service" service
+                    "http://ml-api-adapter-service",
+                ).map_err(|_| VoodooError::InvalidUrl)?;
+                println!("Sending POST /transfer {:?}", req_post_transfer);
+                let request = reqwest::Request::try_from(req_post_transfer)
+                    .map_err(|_| VoodooError::RequestConversionError)?;
+                http_client.execute(request).await
+                    .map_err(|e| VoodooError::FailedToSetParticipantEndpoint(e.to_string()))?;
+
+                println!("Storing in-flight message {}", transfer.transfer_id);
+                in_flight_msgs.write().await.insert(
+                    FspiopMessageId::TransferId(transfer.transfer_id),
+                    client_id
+                );
+
             }
-
-            // Send the transfer prepare, we'll receive it on our POST /transfers soon enough..
-            let req_post_transfer = to_http_request(
-                build_transfer_prepare(
-                    transfer_message.msg_sender,
-                    transfer_message.msg_recipient,
-                    transfer_message.amount,
-                    transfer_message.currency,
-                    Some(transfer_message.transfer_id),
-                ),
-                // TODO: more robust mechanism for finding the "ml api adapter service" service
-                "http://ml-api-adapter-service",
-            ).map_err(|_| VoodooError::InvalidUrl)?;
-            println!("Sending POST /transfer {:?}", req_post_transfer);
-            let request = reqwest::Request::try_from(req_post_transfer)
-                .map_err(|_| VoodooError::RequestConversionError)?;
-            http_client.execute(request).await
-                .map_err(|e| VoodooError::FailedToSetParticipantEndpoint(e.to_string()))?;
-
-            println!("Storing in-flight message {}", transfer_message.transfer_id);
-            in_flight_msgs.write().await.insert(
-                FspiopMessageId::TransferId(transfer_message.transfer_id),
-                client_id
-            );
 
             // 1. hijack the appropriate participants
             //    - participants might not exist- we should require they exist, to begin with

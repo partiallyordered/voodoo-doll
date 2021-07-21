@@ -14,7 +14,7 @@ pub struct TransferMessage {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ClientMessage {
-    Transfer(TransferMessage),
+    Transfers(Vec<TransferMessage>),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
