@@ -11,7 +11,7 @@
     "containers": [
       {
         "name": "app",
-        "image": "ghcr.io/partiallyordered/voodoo-doll:0.1.10",
+        "image": "ghcr.io/partiallyordered/voodoo-doll:0.1.11",
         "ports": [
           {
             "containerPort": 3030
