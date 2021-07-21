@@ -1,7 +1,7 @@
 use fspiox_api::*;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TransferMessage {
     pub msg_sender: common::FspId,
     pub msg_recipient: common::FspId,
@@ -12,23 +12,23 @@ pub struct TransferMessage {
     pub transfer_id: transfer::TransferId,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum ClientMessage {
     Transfer(TransferMessage),
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TransferCompleteMessage {
     pub id: transfer::TransferId,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TransferErrorMessage {
     pub id: transfer::TransferId,
     pub response: common::ErrorResponse,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum ServerMessage {
     TransferComplete(TransferCompleteMessage),
     TransferError(TransferErrorMessage),

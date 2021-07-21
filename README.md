@@ -2,6 +2,8 @@
 An in-cluster Mojaloop participant simulator intended for temporary deployment by mojo
 
 ### TODO
+- Implement a timeout for the service to shut itself down.
+- Make sure to correctly handle sigterm, sigkill, etc.
 - It should be possible to implement more complex scenarios as a state machine. Each event could
     have some outputs, e.g. a quote could return the quote ID and transaction ID as outputs. These
     could be referenced in later events, by type (i.e. Event::QuoteRequest) or by ID (0).
