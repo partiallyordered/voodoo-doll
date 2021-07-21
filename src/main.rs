@@ -245,7 +245,7 @@ async fn handle_post_transfers(
 ) -> std::result::Result<impl warp::Reply, std::convert::Infallible> {
     use std::convert::TryFrom;
     println!("Received POST /transfer {:?}", transfer_prepare);
-    let req_post_transfer = to_http_request(
+    let req_put_transfer = to_http_request(
         build_transfer_fulfil(
             transfer_prepare.payer_fsp,
             transfer_prepare.payee_fsp,
@@ -254,8 +254,8 @@ async fn handle_post_transfers(
         // TODO: more robust mechanism for finding the "ml api adapter service" service
         "http://ml-api-adapter-service",
     ).unwrap();
-    println!("Sending PUT /transfer {:?}", req_post_transfer);
-    let request = reqwest::Request::try_from(req_post_transfer).unwrap();
+    println!("Sending PUT /transfer {:?}", req_put_transfer);
+    let request = reqwest::Request::try_from(req_put_transfer).unwrap();
     http_client.execute(request).await.unwrap();
     println!("Sent PUT /transfer with ID {}", transfer_prepare.transfer_id);
     Ok("")
@@ -371,7 +371,7 @@ async fn client_message(
             http_client.execute(request).await
                 .map_err(|e| VoodooError::FailedToSetParticipantEndpoint(e.to_string()))?;
 
-            println!("Storing in flight message {}", transfer_message.transfer_id);
+            println!("Storing in-flight message {}", transfer_message.transfer_id);
             in_flight_msgs.write().await.insert(
                 FspiopMessageId::TransferId(transfer_message.transfer_id),
                 client_id
