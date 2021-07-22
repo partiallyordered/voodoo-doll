@@ -1,5 +1,5 @@
 pub mod protocol;
-pub const MANIFEST_JSON: &str = include_str!("manifest.json");
+pub const MANIFEST_JSON: &str = include_str!("../kubernetes/pod.json");
 
 // TODO:
 // - test, make sure this works, then users can unwrap() safely
