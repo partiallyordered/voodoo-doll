@@ -13,8 +13,18 @@ pub struct TransferMessage {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct AccountInitialization {
+    pub currency: common::Currency,
+    pub initial_position: common::Amount,
+    pub ndc: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub enum ClientMessage {
+    /// Run end-to-end transfers
     Transfers(Vec<TransferMessage>),
+    /// Create a set of participants. Will be disabled when the socket disconnects.
+    CreateParticipants(Vec<AccountInitialization>),
 }
 
 #[derive(Debug, Serialize, Deserialize)]

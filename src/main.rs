@@ -20,6 +20,8 @@ mod protocol;
 
 #[derive(Error, Debug)]
 enum VoodooError {
+    #[error("Couldn't deserialise switch response into expected type")]
+    ResponseConversionError(String),
     #[error("Couldn't convert from http::request to reqwest::Request")]
     RequestConversionError,
     #[error("Received a non-string websocket message from client")]
@@ -32,14 +34,23 @@ enum VoodooError {
     HostIpNotFound,
     #[error("Failed to set participant endpoint: {0}")]
     FailedToSetParticipantEndpoint(String),
+    #[error("Failed to initialise participant: {0}")]
+    ParticipantInit(String),
+    #[error("Failed to create participant: {0}")]
+    ParticipantCreation(String),
 }
 
 type Result<T> = std::result::Result<T, VoodooError>;
 
 static CLIENT_ID_COUNTER: AtomicUsize = AtomicUsize::new(1);
 
+struct ClientData {
+    chan: mpsc::UnboundedSender<std::result::Result<Message, warp::Error>>,
+    participants: Vec<common::FspId>,
+}
+
 type ClientId = usize;
-type Clients = Arc<RwLock<HashMap<ClientId, mpsc::UnboundedSender<std::result::Result<Message, warp::Error>>>>>;
+type Clients = Arc<RwLock<HashMap<ClientId, ClientData>>>;
 
 #[derive(Hash, PartialEq, Eq, Debug)]
 enum FspiopMessageId {
@@ -185,13 +196,13 @@ async fn handle_put_transfers(
         // TODO: assert that the transfer ID in the URI matches the transfer ID in the payload?
         Some(client_id) => {
             println!("Transfer fulfil received | {:?}", transfer_fulfil);
-            if let Some(client_ws_tx) = clients.write().await.get_mut(client_id) {
+            if let Some(client_data) = clients.write().await.get_mut(client_id) {
                 let msg_text = serde_json::to_string(&protocol::ServerMessage::TransferComplete(
                     protocol::TransferCompleteMessage {
                         id: transfer_id,
                     }
                 )).unwrap();
-                if let Err(_disconnected) = client_ws_tx.send(Ok(Message::text(msg_text))) {
+                if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg_text))) {
                     // Disconnect handled elsewhere
                     println!("Client disconnected, failed to send");
                 }
@@ -214,14 +225,14 @@ async fn handle_put_transfers_error(
         // TODO: assert that the transfer ID in the URI matches the transfer ID in the payload?
         Some(client_id) => {
             println!("Transfer error received {} | {:?}", transfer_id, transfer_error);
-            if let Some(client_ws_tx) = clients.write().await.get_mut(client_id) {
+            if let Some(client_data) = clients.write().await.get_mut(client_id) {
                 let msg_text = serde_json::to_string(&protocol::ServerMessage::TransferError(
                     protocol::TransferErrorMessage {
                         id: transfer_id,
                         response: transfer_error,
                     }
                 )).unwrap();
-                if let Err(_disconnected) = client_ws_tx.send(Ok(Message::text(msg_text))) {
+                if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg_text))) {
                     // Disconnect handled elsewhere
                     println!("Client disconnected, failed to send");
                 }
@@ -276,7 +287,7 @@ async fn ws_connection_handler(ws: WebSocket, clients: Clients, in_flight_msgs: 
         }
     }));
 
-    clients.write().await.insert(client_id, tx);
+    clients.write().await.insert(client_id, ClientData { chan: tx, participants: Vec::new() });
 
     let http_client = reqwest::Client::new();
 
@@ -289,7 +300,7 @@ async fn ws_connection_handler(ws: WebSocket, clients: Clients, in_flight_msgs: 
                 break;
             }
         };
-        if let Err(e) = client_message(client_id, &http_client, msg, &in_flight_msgs).await {
+        if let Err(e) = client_message(client_id, &http_client, msg, &in_flight_msgs, &clients).await {
             println!("Uh oh: {}", e);
         };
     }
@@ -303,7 +314,8 @@ async fn client_message(
     client_id: usize,
     http_client: &reqwest::Client,
     msg: Message,
-    in_flight_msgs: &InFlightFspiopMessages
+    in_flight_msgs: &InFlightFspiopMessages,
+    clients: &Clients,
 ) -> Result<()> {
     // TODO: consider replying with non-string messages with "go away"
     let msg = msg.to_str().map_err(|_| VoodooError::NonStringWebsocketMessageReceived)?;
@@ -321,6 +333,75 @@ async fn client_message(
     let my_address = format!("http://{}:{}", my_ip, 3030);
 
     match msg_de {
+        protocol::ClientMessage::CreateParticipants(create_participants_message) => {
+            use std::convert::TryFrom;
+            let mut new_participants: Vec<common::FspId> = Vec::new();
+            for account_init in create_participants_message.iter() {
+                if let Some(client_data) = clients.write().await.get_mut(&client_id) {
+                    use std::iter;
+                    use rand::{SeedableRng, rngs::StdRng, Rng};
+                    use rand::distributions::Alphanumeric;
+
+                    // TODO: here, we simply assume that the participant does not already exist.
+                    // There's a possibility that they actually already do. We could either
+                    // maintain a pool of participants, or, probably better, if our attempt to
+                    // create said participant fails with "participant exists", try again with a
+                    // different name.
+                    let mut rng: StdRng = SeedableRng::from_entropy(); // TODO: move this outside, if possible
+                    let name_suffix: String = iter::repeat(())
+                        .map(|()| rng.sample(Alphanumeric))
+                        .map(char::from)
+                        .take(25)
+                        .collect();
+                    let name = format!("voodoo-{}", name_suffix);
+
+                    let new_participant_req = participants::to_request(
+                        participants::PostParticipant {
+                            participant: participants::NewParticipant {
+                                currency: account_init.currency,
+                                name: name.clone(),
+                            },
+                        },
+                        "http://centralledger-service",
+                    ).map_err(|_| VoodooError::InvalidUrl)?;
+                    let new_participant_req = reqwest::Request::try_from(new_participant_req)
+                        .map_err(|_| VoodooError::RequestConversionError)?;
+                    let new_participant = http_client.execute(new_participant_req).await
+                        .map_err(|e| VoodooError::ParticipantCreation(e.to_string()))?
+                        .json::<participants::NewParticipant>().await
+                        .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
+
+                    let participant_init_req =
+                        reqwest::Request::try_from(
+                            participants::to_request(
+                                participants::PostInitialPositionAndLimits {
+                                    initial_position_and_limits: participants::InitialPositionAndLimits {
+                                        currency: account_init.currency,
+                                        limit: participants::Limit {
+                                            r#type: participants::LimitType::NetDebitCap,
+                                            value: account_init.ndc,
+                                        },
+                                        initial_position: account_init.initial_position,
+                                    },
+                                    name: name.clone(),
+                                },
+                                "http://centralledger-service",
+                            ).map_err(|_| VoodooError::InvalidUrl)?
+                        ).map_err(|_| VoodooError::RequestConversionError)?;
+                    http_client.execute(participant_init_req).await
+                        .map_err(|e| VoodooError::ParticipantInit(e.to_string()))?;
+
+                    println!("Created participant {} for client", name);
+                    // TODO: Need to disable these participants when we're done with them
+                    client_data.participants.push(new_participant.name.clone());
+                    new_participants.push(new_participant.name);
+                } else {
+                    // TODO: we should return something to the client indicating an error
+                    println!("No client data found for connection!");
+                }
+            }
+        }
+
         protocol::ClientMessage::Transfers(transfers_message) => {
             use std::convert::TryFrom;
 
