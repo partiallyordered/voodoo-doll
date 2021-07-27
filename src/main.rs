@@ -334,10 +334,11 @@ async fn client_message(
 
     match msg_de {
         protocol::ClientMessage::CreateParticipants(create_participants_message) => {
-            use std::convert::TryFrom;
-            let mut new_participants: Vec<common::FspId> = Vec::new();
-            for account_init in create_participants_message.iter() {
-                if let Some(client_data) = clients.write().await.get_mut(&client_id) {
+            if let Some(client_data) = clients.write().await.get_mut(&client_id) {
+                use std::convert::TryFrom;
+                let mut new_participants: Vec<protocol::ClientParticipant> = Vec::new();
+
+                for account_init in create_participants_message.iter() {
                     use std::iter;
                     use rand::{SeedableRng, rngs::StdRng, Rng};
                     use rand::distributions::Alphanumeric;
@@ -394,11 +395,22 @@ async fn client_message(
                     println!("Created participant {} for client", name);
                     // TODO: Need to disable these participants when we're done with them
                     client_data.participants.push(new_participant.name.clone());
-                    new_participants.push(new_participant.name);
-                } else {
-                    // TODO: we should return something to the client indicating an error
-                    println!("No client data found for connection!");
+                    new_participants.push(protocol::ClientParticipant {
+                        name: new_participant.name,
+                        account: *account_init,
+                    });
                 }
+
+                let msg_text = serde_json::to_string(
+                    &protocol::ServerMessage::AssignParticipants(new_participants)
+                ).unwrap();
+                if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg_text))) {
+                    // Disconnect handled elsewhere
+                    println!("Client disconnected, failed to send");
+                }
+            } else {
+                // TODO: we should return something to the client indicating an error
+                println!("No client data found for connection!");
             }
         }
 
@@ -409,9 +421,9 @@ async fn client_message(
 
                 // TODO: check all transfer preconditions (optionally)? I.e.:
                 //       - hub has correct currency accounts
-                //       - 
-                //       - sender exists, has correct currency accounts, has sufficient liquidity
-                //       - recipient exists, has correct currency accounts
+                //       - sender and recipient are active
+                //       - sender exists, has correct, active currency accounts, has sufficient liquidity
+                //       - recipient exists, has correct, active currency accounts
 
                 // TODO: restore FSP endpoints afterward
                 for participant in [&transfer.msg_recipient, &transfer.msg_sender].iter() {

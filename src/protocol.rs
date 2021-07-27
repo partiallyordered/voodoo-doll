@@ -12,7 +12,7 @@ pub struct TransferMessage {
     pub transfer_id: transfer::TransferId,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct AccountInitialization {
     pub currency: common::Currency,
     pub initial_position: common::Amount,
@@ -23,6 +23,8 @@ pub struct AccountInitialization {
 pub enum ClientMessage {
     /// Run end-to-end transfers
     Transfers(Vec<TransferMessage>),
+    // TODO: this _could_ be a vector of vectors of accounts. Each 0th-level vector would represent
+    // a participant, and each 1st-level vector would contain desired accounts.
     /// Create a set of participants. Will be disabled when the socket disconnects.
     CreateParticipants(Vec<AccountInitialization>),
 }
@@ -39,7 +41,14 @@ pub struct TransferErrorMessage {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct ClientParticipant {
+    pub name: common::FspId,
+    pub account: AccountInitialization,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub enum ServerMessage {
     TransferComplete(TransferCompleteMessage),
     TransferError(TransferErrorMessage),
+    AssignParticipants(Vec<ClientParticipant>),
 }
