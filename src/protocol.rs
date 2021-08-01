@@ -1,6 +1,12 @@
 use fspiox_api::*;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "typescript_types")]
+use ts_rs::{TS, export};
+#[cfg(feature = "typescript_types")]
+use std::any::TypeId;
+
+#[cfg_attr(feature = "typescript_types", derive(TS))]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TransferMessage {
     pub msg_sender: common::FspId,
@@ -12,6 +18,7 @@ pub struct TransferMessage {
     pub transfer_id: transfer::TransferId,
 }
 
+#[cfg_attr(feature = "typescript_types", derive(TS))]
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct AccountInitialization {
     pub currency: common::Currency,
@@ -19,6 +26,7 @@ pub struct AccountInitialization {
     pub ndc: u32,
 }
 
+#[cfg_attr(feature = "typescript_types", derive(TS))]
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ClientMessage {
     /// Run end-to-end transfers
@@ -29,26 +37,47 @@ pub enum ClientMessage {
     CreateParticipants(Vec<AccountInitialization>),
 }
 
+#[cfg_attr(feature = "typescript_types", derive(TS))]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TransferCompleteMessage {
     pub id: transfer::TransferId,
 }
 
+#[cfg_attr(feature = "typescript_types", derive(TS))]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TransferErrorMessage {
     pub id: transfer::TransferId,
     pub response: common::ErrorResponse,
 }
 
+#[cfg_attr(feature = "typescript_types", derive(TS))]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ClientParticipant {
     pub name: common::FspId,
     pub account: AccountInitialization,
 }
 
+#[cfg_attr(feature = "typescript_types", derive(TS))]
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ServerMessage {
     TransferComplete(TransferCompleteMessage),
     TransferError(TransferErrorMessage),
     AssignParticipants(Vec<ClientParticipant>),
+}
+
+#[cfg(feature = "typescript_types")]
+export! {
+    TransferCompleteMessage,
+    TransferErrorMessage,
+    AccountInitialization,
+    ClientParticipant,
+    TransferMessage,
+    common::DateTime,
+    common::Amount,
+    common::Currency,
+    common::ErrorResponse,
+    common::ErrorInformation,
+    common::MojaloopApiError,
+    ServerMessage,
+    ClientMessage => "clients/typescript/src/lib/protocol.ts"
 }
