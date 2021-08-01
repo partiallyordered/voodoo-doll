@@ -16,7 +16,7 @@ hyper = "0.14"
 warp = "0.3"
 futures = "0.3"
 # fspiox-api = { git = "https://github.com/partiallyordered/fspiox-api", rev = "8a91c68d30196526f3a878556db52d469c451e6d", features = ["fsp_http"] }
-fspiox-api = { path = "/home/msk/projects/github.com/msk-/fspiox-api/" ,features = ["fsp_http", "typescript_types"] }
+fspiox-api = { path = "/home/msk/projects/github.com/msk-/fspiox-api/", features = ["fsp_http", "typescript_types"] }
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
@@ -28,7 +28,10 @@ strum = "0.21"
 rand = { version = "0.8", features = ["std_rng"] }
 
 # optional
-ts-rs = { version = "3", optional = true }
+# At the time of writing we need to use the git version as internally tagged unions are not yet in
+# a released crate. Generally speaking, we might prefer externally tagged enums, There's an issue
+# for that here: https://github.com/Aleph-Alpha/ts-rs/issues/10
+ts-rs = { git = "https://github.com/Aleph-Alpha/ts-rs", rev = "ddd461522591a90b987b22dd05e06cfccbea6f5a", optional = true }
 
 [features]
 typescript_types = ["ts-rs"]

@@ -28,6 +28,7 @@ pub struct AccountInitialization {
 
 #[cfg_attr(feature = "typescript_types", derive(TS))]
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "type")]
 pub enum ClientMessage {
     /// Run end-to-end transfers
     Transfers(Vec<TransferMessage>),
@@ -59,6 +60,7 @@ pub struct ClientParticipant {
 
 #[cfg_attr(feature = "typescript_types", derive(TS))]
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "type")]
 pub enum ServerMessage {
     TransferComplete(TransferCompleteMessage),
     TransferError(TransferErrorMessage),

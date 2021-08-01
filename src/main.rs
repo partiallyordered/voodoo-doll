@@ -418,7 +418,6 @@ async fn client_message(
             use std::convert::TryFrom;
 
             for transfer in transfers_message.iter() {
-
                 // TODO: check all transfer preconditions (optionally)? I.e.:
                 //       - hub has correct currency accounts
                 //       - sender and recipient are active
