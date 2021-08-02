@@ -362,9 +362,9 @@ async fn client_message(
                     let name_suffix: String = iter::repeat(())
                         .map(|()| rng.sample(Alphanumeric))
                         .map(char::from)
-                        .take(23)
+                        .take(24)
                         .collect();
-                    let name = format!("voodoo-{}", name_suffix);
+                    let name = format!("voodoo{}", name_suffix);
 
                     let new_participant_req =
                         reqwest::Request::try_from(
