@@ -362,7 +362,7 @@ async fn client_message(
                     let name_suffix: String = iter::repeat(())
                         .map(|()| rng.sample(Alphanumeric))
                         .map(char::from)
-                        .take(25)
+                        .take(23)
                         .collect();
                     let name = format!("voodoo-{}", name_suffix);
 
@@ -378,21 +378,15 @@ async fn client_message(
                                 "http://centralledger-service",
                             ).map_err(|_| VoodooError::InvalidUrl)?
                         ).map_err(|_| VoodooError::RequestConversionError)?;
-                    let new_participant_response = http_client.execute(new_participant_req).await
-                        .map_err(|e| VoodooError::ParticipantCreation(e.to_string()))?;
-                    let new_participant_response_text = new_participant_response.text().await.unwrap();
-                    println!("New participant response: {:?}", new_participant_response_text);
-                    let new_participant = serde_json::from_str::<MlApiResponse<participants::Participant>>(&new_participant_response_text)
+                    let new_participant = http_client.execute(new_participant_req).await
+                        .map_err(|e| VoodooError::ParticipantCreation(e.to_string()))?
+                        .json::<MlApiResponse<participants::Participant>>().await
                         .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
-                    // let new_participant = new_participant
-                    //     .json::<participants::Participant>().await
-                    //     .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
 
                     match new_participant {
                         MlApiResponse::Err(ml_err) => {
-                            println!("Whoopsie. TODO: let client know there was a problem. This problem: {:?}", ml_err);
-                            return Ok(());
-                        }
+                            println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", ml_err);
+                        },
                         MlApiResponse::Response(new_participant) => {
                             let participant_init_req =
                                 reqwest::Request::try_from(
