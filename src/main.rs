@@ -347,7 +347,7 @@ async fn client_message(
         protocol::ClientMessage::CreateHubAccounts(currencies) => {
             if let Some(client_data) = clients.write().await.get_mut(&client_id) {
                 for currency in &currencies {
-                    for r#type in [participants::HubAccountType::HubReconciliation, participants::HubAccountType::HubMultilateralSettlement] {
+                    for r#type in [participants::HubAccountType::HubReconciliation, participants::HubAccountType::HubMultilateralSettlement].iter() {
                         let create_account_req =
                             reqwest::Request::try_from(
                                 participants::to_request(
@@ -355,7 +355,7 @@ async fn client_message(
                                         name: "Hub".to_string(),
                                         account: participants::HubAccount {
                                             currency: *currency,
-                                            r#type,
+                                            r#type: *r#type,
                                         }
                                     },
                                     "http://centralledger-service",
