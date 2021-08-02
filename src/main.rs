@@ -335,6 +335,13 @@ async fn client_message(
     let my_ip = std::env::var("HOST_IP").map_err(|_| VoodooError::HostIpNotFound)?;
     let my_address = format!("http://{}:{}", my_ip, 3030);
 
+    #[derive(serde::Deserialize)]
+    #[serde(untagged)]
+    enum MlApiResponse<T> {
+        Err(fspiox_api::common::ErrorResponse),
+        Response(T),
+    }
+
     match msg_de {
         protocol::ClientMessage::CreateParticipants(create_participants_message) => {
             if let Some(client_data) = clients.write().await.get_mut(&client_id) {
@@ -375,39 +382,47 @@ async fn client_message(
                         .map_err(|e| VoodooError::ParticipantCreation(e.to_string()))?;
                     let new_participant_response_text = new_participant_response.text().await.unwrap();
                     println!("New participant response: {:?}", new_participant_response_text);
-                    let new_participant = serde_json::from_str::<participants::Participant>(&new_participant_response_text)
+                    let new_participant = serde_json::from_str::<MlApiResponse<participants::Participant>>(&new_participant_response_text)
                         .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
                     // let new_participant = new_participant
                     //     .json::<participants::Participant>().await
                     //     .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
 
-                    let participant_init_req =
-                        reqwest::Request::try_from(
-                            participants::to_request(
-                                participants::PostInitialPositionAndLimits {
-                                    initial_position_and_limits: participants::InitialPositionAndLimits {
-                                        currency: account_init.currency,
-                                        limit: participants::Limit {
-                                            r#type: participants::LimitType::NetDebitCap,
-                                            value: account_init.ndc,
+                    match new_participant {
+                        MlApiResponse::Err(ml_err) => {
+                            println!("Whoopsie. TODO: let client know there was a problem. This problem: {:?}", ml_err);
+                            return Ok(());
+                        }
+                        MlApiResponse::Response(new_participant) => {
+                            let participant_init_req =
+                                reqwest::Request::try_from(
+                                    participants::to_request(
+                                        participants::PostInitialPositionAndLimits {
+                                            initial_position_and_limits: participants::InitialPositionAndLimits {
+                                                currency: account_init.currency,
+                                                limit: participants::Limit {
+                                                    r#type: participants::LimitType::NetDebitCap,
+                                                    value: account_init.ndc,
+                                                },
+                                                initial_position: account_init.initial_position,
+                                            },
+                                            name: name.clone(),
                                         },
-                                        initial_position: account_init.initial_position,
-                                    },
-                                    name: name.clone(),
-                                },
-                                "http://centralledger-service",
-                            ).map_err(|_| VoodooError::InvalidUrl)?
-                        ).map_err(|_| VoodooError::RequestConversionError)?;
-                    http_client.execute(participant_init_req).await
-                        .map_err(|e| VoodooError::ParticipantInit(e.to_string()))?;
+                                        "http://centralledger-service",
+                                    ).map_err(|_| VoodooError::InvalidUrl)?
+                                ).map_err(|_| VoodooError::RequestConversionError)?;
+                            http_client.execute(participant_init_req).await
+                                .map_err(|e| VoodooError::ParticipantInit(e.to_string()))?;
 
-                    println!("Created participant {} for client", name);
-                    // TODO: Need to disable these participants when we're done with them
-                    client_data.participants.push(new_participant.name.clone());
-                    new_participants.push(protocol::ClientParticipant {
-                        name: new_participant.name,
-                        account: *account_init,
-                    });
+                            println!("Created participant {} for client", name);
+                            // TODO: Need to disable these participants when we're done with them
+                            client_data.participants.push(new_participant.name.clone());
+                            new_participants.push(protocol::ClientParticipant {
+                                name: new_participant.name,
+                                account: *account_init,
+                            });
+                        }
+                    }
                 }
 
                 let msg_text = serde_json::to_string(
