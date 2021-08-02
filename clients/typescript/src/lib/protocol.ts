@@ -293,10 +293,11 @@ export type MojaloopApiError =
   | "5400";
 
 export type ServerMessage =
-  | { type: "TransferComplete" } & TransferCompleteMessage
-  | { type: "TransferError" } & TransferErrorMessage
-  | { type: "AssignParticipants" } & ClientParticipant[];
+  | { type: "TransferComplete"; value: TransferCompleteMessage }
+  | { type: "TransferError"; value: TransferErrorMessage }
+  | { type: "AssignParticipants"; value: ClientParticipant[] };
 
 export type ClientMessage =
-  | { type: "Transfers" } & TransferMessage[]
-  | { type: "CreateParticipants" } & AccountInitialization[];
+  | { type: "Transfers"; value: TransferMessage[] }
+  | { type: "CreateParticipants"; value: AccountInitialization[];
+};

@@ -183,6 +183,8 @@ async fn main() {
         .or(put_transfers_error)
         .recover(handle_rejection);
 
+    println!("Voodoo Doll {} starting on port 3030", env!("CARGO_PKG_VERSION"));
+
     warp::serve(routes).run(([0, 0, 0, 0], 3030)).await;
 }
 
@@ -301,6 +303,7 @@ async fn ws_connection_handler(ws: WebSocket, clients: Clients, in_flight_msgs: 
             }
         };
         if let Err(e) = client_message(client_id, &http_client, msg, &in_flight_msgs, &clients).await {
+            // TODO: let the client know they sent us something we couldn't handle
             println!("Uh oh: {}", e);
         };
     }
