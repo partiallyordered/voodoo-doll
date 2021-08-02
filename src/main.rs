@@ -371,12 +371,15 @@ async fn client_message(
                                 "http://centralledger-service",
                             ).map_err(|_| VoodooError::InvalidUrl)?
                         ).map_err(|_| VoodooError::RequestConversionError)?;
-                    let new_participant = http_client.execute(new_participant_req).await
+                    let new_participant_response = http_client.execute(new_participant_req).await
                         .map_err(|e| VoodooError::ParticipantCreation(e.to_string()))?;
-                    println!("New participant response: {:?}", new_participant);
-                    let new_participant = new_participant
-                        .json::<participants::Participant>().await
+                    let new_participant_response_text = new_participant_response.text().await.unwrap();
+                    println!("New participant response: {:?}", new_participant_response_text);
+                    let new_participant = serde_json::from_str::<participants::Participant>(&new_participant_response_text)
                         .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
+                    // let new_participant = new_participant
+                    //     .json::<participants::Participant>().await
+                    //     .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
 
                     let participant_init_req =
                         reqwest::Request::try_from(
