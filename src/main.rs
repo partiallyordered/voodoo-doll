@@ -20,7 +20,7 @@ mod protocol;
 
 #[derive(Error, Debug)]
 enum VoodooError {
-    #[error("Couldn't deserialise switch response into expected type. Error: {0}")]
+    #[error("Couldn't deserialize switch response into expected type. Error: {0}")]
     ResponseConversionError(String),
     #[error("Couldn't convert from http::request to reqwest::Request")]
     RequestConversionError,
@@ -359,19 +359,22 @@ async fn client_message(
                         .collect();
                     let name = format!("voodoo-{}", name_suffix);
 
-                    let new_participant_req = participants::to_request(
-                        participants::PostParticipant {
-                            participant: participants::NewParticipant {
-                                currency: account_init.currency,
-                                name: name.clone(),
-                            },
-                        },
-                        "http://centralledger-service",
-                    ).map_err(|_| VoodooError::InvalidUrl)?;
-                    let new_participant_req = reqwest::Request::try_from(new_participant_req)
-                        .map_err(|_| VoodooError::RequestConversionError)?;
+                    let new_participant_req =
+                        reqwest::Request::try_from(
+                            participants::to_request(
+                                participants::PostParticipant {
+                                    participant: participants::NewParticipant {
+                                        currency: account_init.currency,
+                                        name: name.clone(),
+                                    },
+                                },
+                                "http://centralledger-service",
+                            ).map_err(|_| VoodooError::InvalidUrl)?
+                        ).map_err(|_| VoodooError::RequestConversionError)?;
                     let new_participant = http_client.execute(new_participant_req).await
-                        .map_err(|e| VoodooError::ParticipantCreation(e.to_string()))?
+                        .map_err(|e| VoodooError::ParticipantCreation(e.to_string()))?;
+                    println!("New participant response: {:?}", new_participant);
+                    let new_participant = new_participant
                         .json::<participants::Participant>().await
                         .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
 
