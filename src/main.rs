@@ -20,7 +20,7 @@ mod protocol;
 
 #[derive(Error, Debug)]
 enum VoodooError {
-    #[error("Couldn't deserialise switch response into expected type")]
+    #[error("Couldn't deserialise switch response into expected type. Error: {0}")]
     ResponseConversionError(String),
     #[error("Couldn't convert from http::request to reqwest::Request")]
     RequestConversionError,
@@ -372,7 +372,7 @@ async fn client_message(
                         .map_err(|_| VoodooError::RequestConversionError)?;
                     let new_participant = http_client.execute(new_participant_req).await
                         .map_err(|e| VoodooError::ParticipantCreation(e.to_string()))?
-                        .json::<participants::NewParticipant>().await
+                        .json::<participants::Participant>().await
                         .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
 
                     let participant_init_req =
