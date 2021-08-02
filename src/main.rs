@@ -327,6 +327,7 @@ async fn client_message(
         .map_err(|_| VoodooError::WebsocketMessageDeserializeFailed)?;
 
     use mojaloop_api::central_ledger::participants;
+    use std::convert::TryFrom;
 
     // TODO: Get this at startup and panic if it fails. If it fails once, it will always fail.
     // TODO: Assert hostname is valid URI using url::Uri::parse?
@@ -343,9 +344,52 @@ async fn client_message(
     }
 
     match msg_de {
-        protocol::ClientMessage::CreateParticipants(create_participants_message) => {
+        protocol::ClientMessage::CreateHubAccounts(currencies) => {
             if let Some(client_data) = clients.write().await.get_mut(&client_id) {
-                use std::convert::TryFrom;
+                for currency in &currencies {
+                    for r#type in [participants::HubAccountType::HubReconciliation, participants::HubAccountType::HubMultilateralSettlement] {
+                        let create_account_req =
+                            reqwest::Request::try_from(
+                                participants::to_request(
+                                    participants::PostHubAccount {
+                                        name: "Hub".to_string(),
+                                        account: participants::HubAccount {
+                                            currency: *currency,
+                                            r#type,
+                                        }
+                                    },
+                                    "http://centralledger-service",
+                                ).map_err(|_| VoodooError::InvalidUrl)?
+                            ).map_err(|_| VoodooError::RequestConversionError)?;
+                        let result = http_client.execute(create_account_req).await
+                            .map_err(|e| VoodooError::ParticipantCreation(e.to_string()))?
+                            .json::<MlApiResponse<()>>().await
+                            .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
+                        match result {
+                            MlApiResponse::Err(ml_err) => {
+                                println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", ml_err);
+                            },
+                            MlApiResponse::Response(()) => {}
+                        }
+                    }
+                }
+                let msg_text = serde_json::to_string(
+                    &protocol::ServerMessage::HubAccountsCreated(currencies)
+                ).unwrap();
+                if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg_text))) {
+                    // Disconnect handled elsewhere
+                    println!("Client disconnected, failed to send");
+                }
+            } else {
+                // TODO: we should return something to the client indicating an error
+                println!("No client data found for connection!");
+            }
+        }
+        protocol::ClientMessage::CreateParticipants(create_participants_message) => {
+            // TODO: it's pretty obvious that the client will want the hub accounts created. We
+            // could probably just do that? If anyone ever doesn't want the hub accounts created
+            // first, we'll get a PR.
+            if let Some(client_data) = clients.write().await.get_mut(&client_id) {
                 let mut new_participants: Vec<protocol::ClientParticipant> = Vec::new();
 
                 for account_init in create_participants_message.iter() {

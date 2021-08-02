@@ -295,9 +295,10 @@ export type MojaloopApiError =
 export type ServerMessage =
   | { type: "TransferComplete"; value: TransferCompleteMessage }
   | { type: "TransferError"; value: TransferErrorMessage }
-  | { type: "AssignParticipants"; value: ClientParticipant[] };
+  | { type: "AssignParticipants"; value: ClientParticipant[] }
+  | { type: "HubAccountsCreated"; value: Currency[] };
 
 export type ClientMessage =
   | { type: "Transfers"; value: TransferMessage[] }
-  | { type: "CreateParticipants"; value: AccountInitialization[];
-};
+  | { type: "CreateHubAccounts"; value: Currency[]; }
+  | { type: "CreateParticipants"; value: AccountInitialization[] };

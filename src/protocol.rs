@@ -32,6 +32,8 @@ pub struct AccountInitialization {
 pub enum ClientMessage {
     /// Run end-to-end transfers
     Transfers(Vec<TransferMessage>),
+    /// Create hub settlement and reconciliation accounts
+    CreateHubAccounts(Vec<common::Currency>),
     // TODO: this _could_ be a vector of vectors of accounts. Each 0th-level vector would represent
     // a participant, and each 1st-level vector would contain desired accounts.
     /// Create a set of participants. Will be disabled when the socket disconnects.
@@ -65,6 +67,7 @@ pub enum ServerMessage {
     TransferComplete(TransferCompleteMessage),
     TransferError(TransferErrorMessage),
     AssignParticipants(Vec<ClientParticipant>),
+    HubAccountsCreated(Vec<common::Currency>),
 }
 
 #[cfg(feature = "typescript_types")]
