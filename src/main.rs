@@ -342,6 +342,8 @@ async fn client_message(
         Err(fspiox_api::common::ErrorResponse),
         Response(T),
     }
+    #[derive(serde::Deserialize)]
+    struct Empty {}
 
     match msg_de {
         protocol::ClientMessage::CreateHubAccounts(currencies) => {
@@ -363,13 +365,13 @@ async fn client_message(
                             ).map_err(|_| VoodooError::RequestConversionError)?;
                         let result = http_client.execute(create_account_req).await
                             .map_err(|e| VoodooError::ParticipantCreation(e.to_string()))?
-                            .json::<MlApiResponse<()>>().await
+                            .json::<MlApiResponse<Empty>>().await
                             .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
                         match result {
                             MlApiResponse::Err(ml_err) => {
                                 println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", ml_err);
                             },
-                            MlApiResponse::Response(()) => {}
+                            MlApiResponse::Response(_) => {}
                         }
                     }
                 }
