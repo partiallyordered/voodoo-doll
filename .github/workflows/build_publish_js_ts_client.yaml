@@ -1,0 +1,27 @@
+name: Node.js Package
+
+on:
+  release:
+    types: [created]
+  push:
+    branches:
+    - '**'
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    # Setup .npmrc file to publish to npm
+    - uses: actions/setup-node@v2
+      with:
+        node-version: '12.x'
+        registry-url: 'https://registry.npmjs.org'
+    - run: cd clients/typescript
+    - run: npm ci
+    - run: npm run build
+    - run: npm publish
+      if: ${{ github.event_name == 'release' }}
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
