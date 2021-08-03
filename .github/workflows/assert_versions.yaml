@@ -21,5 +21,5 @@ jobs:
     - name: Get k8s manifest version
       run: jq '.spec.containers[] | select(.name == "app") | .image | split(":")[1]' -r kubernetes/pod.json >> versions
     - name: Assert there is only one version
-      run: '[[ $(uniq < versions | wc -l) == 3 ]]'
+      run: '[[ $(uniq < versions | wc -l) == 1 ]]'
 
