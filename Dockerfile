@@ -1,4 +1,4 @@
-FROM rust:1.49 as builder
+FROM rust:1.53 as builder
 
 RUN USER=root cargo new --bin voodoo-doll
 WORKDIR ./voodoo-doll

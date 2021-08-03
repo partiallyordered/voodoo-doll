@@ -20,7 +20,7 @@ mod protocol;
 
 #[derive(Error, Debug)]
 enum VoodooError {
-    #[error("Couldn't deserialise switch response into expected type")]
+    #[error("Couldn't deserialize switch response into expected type. Error: {0}")]
     ResponseConversionError(String),
     #[error("Couldn't convert from http::request to reqwest::Request")]
     RequestConversionError,
@@ -183,6 +183,8 @@ async fn main() {
         .or(put_transfers_error)
         .recover(handle_rejection);
 
+    println!("Voodoo Doll {} starting on port 3030", env!("CARGO_PKG_VERSION"));
+
     warp::serve(routes).run(([0, 0, 0, 0], 3030)).await;
 }
 
@@ -301,6 +303,7 @@ async fn ws_connection_handler(ws: WebSocket, clients: Clients, in_flight_msgs: 
             }
         };
         if let Err(e) = client_message(client_id, &http_client, msg, &in_flight_msgs, &clients).await {
+            // TODO: let the client know they sent us something we couldn't handle
             println!("Uh oh: {}", e);
         };
     }
@@ -324,6 +327,7 @@ async fn client_message(
         .map_err(|_| VoodooError::WebsocketMessageDeserializeFailed)?;
 
     use mojaloop_api::central_ledger::participants;
+    use std::convert::TryFrom;
 
     // TODO: Get this at startup and panic if it fails. If it fails once, it will always fail.
     // TODO: Assert hostname is valid URI using url::Uri::parse?
@@ -332,10 +336,71 @@ async fn client_message(
     let my_ip = std::env::var("HOST_IP").map_err(|_| VoodooError::HostIpNotFound)?;
     let my_address = format!("http://{}:{}", my_ip, 3030);
 
+    #[derive(serde::Deserialize)]
+    #[serde(untagged)]
+    enum MlApiResponse<T> {
+        Err(fspiox_api::common::ErrorResponse),
+        Response(T),
+    }
+    #[derive(serde::Deserialize)]
+    struct Empty {}
+
     match msg_de {
-        protocol::ClientMessage::CreateParticipants(create_participants_message) => {
+        protocol::ClientMessage::CreateHubAccounts(currencies) => {
             if let Some(client_data) = clients.write().await.get_mut(&client_id) {
-                use std::convert::TryFrom;
+                for currency in &currencies {
+                    for r#type in [participants::HubAccountType::HubReconciliation, participants::HubAccountType::HubMultilateralSettlement].iter() {
+                        let create_account_req =
+                            reqwest::Request::try_from(
+                                participants::to_request(
+                                    participants::PostHubAccount {
+                                        name: "Hub".to_string(),
+                                        account: participants::HubAccount {
+                                            currency: *currency,
+                                            r#type: *r#type,
+                                        }
+                                    },
+                                    "http://centralledger-service",
+                                ).map_err(|_| VoodooError::InvalidUrl)?
+                            ).map_err(|_| VoodooError::RequestConversionError)?;
+                        // TODO: we don't actually care about the json response here if the
+                        // response code was a 2xx. If it wasn't, we might be interested in the
+                        // following response:
+                        //   ErrorResponse {
+                        //     error_information: ErrorInformation {
+                        //       error_code: AddPartyInfoError,
+                        //       error_description: "Add Party information error - Hub account has already been registered."
+                        //     }
+                        //   }
+                        let result = http_client.execute(create_account_req).await
+                            .map_err(|e| VoodooError::ParticipantCreation(e.to_string()))?
+                            .json::<MlApiResponse<Empty>>().await
+                            .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
+                        match result {
+                            MlApiResponse::Err(ml_err) => {
+                                println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", ml_err);
+                            },
+                            MlApiResponse::Response(_) => {}
+                        }
+                    }
+                }
+                let msg_text = serde_json::to_string(
+                    &protocol::ServerMessage::HubAccountsCreated(currencies)
+                ).unwrap();
+                if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg_text))) {
+                    // Disconnect handled elsewhere
+                    println!("Client disconnected, failed to send");
+                }
+            } else {
+                // TODO: we should return something to the client indicating an error
+                println!("No client data found for connection!");
+            }
+        }
+        protocol::ClientMessage::CreateParticipants(create_participants_message) => {
+            // TODO: it's pretty obvious that the client will want the hub accounts created. We
+            // could probably just do that? If anyone ever doesn't want the hub accounts created
+            // first, we'll get a PR.
+            if let Some(client_data) = clients.write().await.get_mut(&client_id) {
                 let mut new_participants: Vec<protocol::ClientParticipant> = Vec::new();
 
                 for account_init in create_participants_message.iter() {
@@ -352,53 +417,61 @@ async fn client_message(
                     let name_suffix: String = iter::repeat(())
                         .map(|()| rng.sample(Alphanumeric))
                         .map(char::from)
-                        .take(25)
+                        .take(24)
                         .collect();
-                    let name = format!("voodoo-{}", name_suffix);
+                    let name = format!("voodoo{}", name_suffix);
 
-                    let new_participant_req = participants::to_request(
-                        participants::PostParticipant {
-                            participant: participants::NewParticipant {
-                                currency: account_init.currency,
-                                name: name.clone(),
-                            },
-                        },
-                        "http://centralledger-service",
-                    ).map_err(|_| VoodooError::InvalidUrl)?;
-                    let new_participant_req = reqwest::Request::try_from(new_participant_req)
-                        .map_err(|_| VoodooError::RequestConversionError)?;
-                    let new_participant = http_client.execute(new_participant_req).await
-                        .map_err(|e| VoodooError::ParticipantCreation(e.to_string()))?
-                        .json::<participants::NewParticipant>().await
-                        .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
-
-                    let participant_init_req =
+                    let new_participant_req =
                         reqwest::Request::try_from(
                             participants::to_request(
-                                participants::PostInitialPositionAndLimits {
-                                    initial_position_and_limits: participants::InitialPositionAndLimits {
+                                participants::PostParticipant {
+                                    participant: participants::NewParticipant {
                                         currency: account_init.currency,
-                                        limit: participants::Limit {
-                                            r#type: participants::LimitType::NetDebitCap,
-                                            value: account_init.ndc,
-                                        },
-                                        initial_position: account_init.initial_position,
+                                        name: name.clone(),
                                     },
-                                    name: name.clone(),
                                 },
                                 "http://centralledger-service",
                             ).map_err(|_| VoodooError::InvalidUrl)?
                         ).map_err(|_| VoodooError::RequestConversionError)?;
-                    http_client.execute(participant_init_req).await
-                        .map_err(|e| VoodooError::ParticipantInit(e.to_string()))?;
+                    let new_participant = http_client.execute(new_participant_req).await
+                        .map_err(|e| VoodooError::ParticipantCreation(e.to_string()))?
+                        .json::<MlApiResponse<participants::Participant>>().await
+                        .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
 
-                    println!("Created participant {} for client", name);
-                    // TODO: Need to disable these participants when we're done with them
-                    client_data.participants.push(new_participant.name.clone());
-                    new_participants.push(protocol::ClientParticipant {
-                        name: new_participant.name,
-                        account: *account_init,
-                    });
+                    match new_participant {
+                        MlApiResponse::Err(ml_err) => {
+                            println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", ml_err);
+                        },
+                        MlApiResponse::Response(new_participant) => {
+                            let participant_init_req =
+                                reqwest::Request::try_from(
+                                    participants::to_request(
+                                        participants::PostInitialPositionAndLimits {
+                                            initial_position_and_limits: participants::InitialPositionAndLimits {
+                                                currency: account_init.currency,
+                                                limit: participants::Limit {
+                                                    r#type: participants::LimitType::NetDebitCap,
+                                                    value: account_init.ndc,
+                                                },
+                                                initial_position: account_init.initial_position,
+                                            },
+                                            name: name.clone(),
+                                        },
+                                        "http://centralledger-service",
+                                    ).map_err(|_| VoodooError::InvalidUrl)?
+                                ).map_err(|_| VoodooError::RequestConversionError)?;
+                            http_client.execute(participant_init_req).await
+                                .map_err(|e| VoodooError::ParticipantInit(e.to_string()))?;
+
+                            println!("Created participant {} for client", name);
+                            // TODO: Need to disable these participants when we're done with them
+                            client_data.participants.push(new_participant.name.clone());
+                            new_participants.push(protocol::ClientParticipant {
+                                name: new_participant.name,
+                                account: *account_init,
+                            });
+                        }
+                    }
                 }
 
                 let msg_text = serde_json::to_string(
@@ -418,7 +491,6 @@ async fn client_message(
             use std::convert::TryFrom;
 
             for transfer in transfers_message.iter() {
-
                 // TODO: check all transfer preconditions (optionally)? I.e.:
                 //       - hub has correct currency accounts
                 //       - sender and recipient are active

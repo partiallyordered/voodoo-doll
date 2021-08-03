@@ -1,6 +1,6 @@
 [package]
 name = "voodoo-doll"
-version = "0.1.14"
+version = "0.1.17"
 authors = ["msk- <mattkingston@gmail.com>"]
 edition = "2018"
 
@@ -15,14 +15,23 @@ tokio-stream = { version = "0.1.6" }
 hyper = "0.14"
 warp = "0.3"
 futures = "0.3"
-fspiox-api = { git = "https://github.com/partiallyordered/fspiox-api", rev = "8a91c68d30196526f3a878556db52d469c451e6d", features = ["fsp_http"] }
-# fspiox-api = { path = "/home/msk/projects/github.com/msk-/fspiox-api/" ,features = ["fsp_http"] }
+fspiox-api = { git = "https://github.com/partiallyordered/fspiox-api", rev = "73f6e2d84f2f225bf5842d698c59244465a29980", features = ["fsp_http", "typescript_types"] }
+# fspiox-api = { path = "/home/msk/projects/github.com/msk-/fspiox-api/", features = ["fsp_http", "typescript_types"] }
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
-mojaloop-api = { git = "https://github.com/partiallyordered/mojaloop-api", rev = "cbda45110bdbde52c5998aef8dee386d9a11dd81" }
+mojaloop-api = { git = "https://github.com/partiallyordered/mojaloop-api", rev = "28d30b9ad43d2f65e679d9f73a22f793e23bf185" }
 # mojaloop-api = { path = "/home/msk/projects/github.com/msk-/mojaloop-api/" }
 gethostname = "0.2"
 thiserror = "1.0"
 strum = "0.21"
 rand = { version = "0.8", features = ["std_rng"] }
+
+# optional
+# At the time of writing we need to use the git version as internally tagged unions are not yet in
+# a released crate. Generally speaking, we might prefer externally tagged enums, There's an issue
+# for that here: https://github.com/Aleph-Alpha/ts-rs/issues/10
+ts-rs = { git = "https://github.com/Aleph-Alpha/ts-rs", rev = "ddd461522591a90b987b22dd05e06cfccbea6f5a", optional = true }
+
+[features]
+typescript_types = ["ts-rs"]
