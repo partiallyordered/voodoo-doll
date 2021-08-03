@@ -1,7 +1,7 @@
 {
-  "name": "voodoo-client-typescript",
+  "name": "voodoo-client",
   "version": "0.1.0",
-  "description": "",
+  "description": "A client for https://github.com/partiallyordered/voodoo-doll",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
@@ -9,16 +9,14 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
-  "author": "",
-  "license": "GPLv3",
+  "author": "Matt Kingston",
+  "license": "ISC",
   "devDependencies": {
     "tslint": "^6.1.3",
     "typescript": "^4.3.5"
   },
   "dependencies": {
-    "@kubernetes/client-node": "^0.15.0",
     "@types/ws": "^6.0.4",
-    "dotenv": "^10.0.0",
     "ws": "^8.0.0"
   }
 }
