@@ -363,6 +363,15 @@ async fn client_message(
                                     "http://centralledger-service",
                                 ).map_err(|_| VoodooError::InvalidUrl)?
                             ).map_err(|_| VoodooError::RequestConversionError)?;
+                        // TODO: we don't actually care about the json response here if the
+                        // response code was a 2xx. If it wasn't, we might be interested in the
+                        // following response:
+                        //   ErrorResponse {
+                        //     error_information: ErrorInformation {
+                        //       error_code: AddPartyInfoError,
+                        //       error_description: "Add Party information error - Hub account has already been registered."
+                        //     }
+                        //   }
                         let result = http_client.execute(create_account_req).await
                             .map_err(|e| VoodooError::ParticipantCreation(e.to_string()))?
                             .json::<MlApiResponse<Empty>>().await
