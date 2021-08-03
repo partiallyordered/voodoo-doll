@@ -1,0 +1,25 @@
+name: Assert all versions are aligned
+
+on:
+  push:
+    branches:
+    - '**'
+  pull_request:
+
+jobs:
+  main:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v2
+    - name: Get yj
+      run: curl -L https://github.com/sclevine/yj/releases/download/v5.0.0/yj-linux > yj && chmod +x yj
+    - name: Get Cargo version
+      run: ./yj -tj < Cargo.toml | jq '.package.version' -r > versions
+    - name: Get js/ts client version
+      run: jq '.version' clients/typescript/package.json -r >> versions
+    - name: Get k8s manifest version
+      run: jq '.spec.containers[] | select(.name == "app") | .image | split(":")[1]' -r kubernetes/pod.json >> versions
+    - name: Assert there is only one version
+      run: '[[ $(uniq < versions | wc -l) == 3 ]]'
+
