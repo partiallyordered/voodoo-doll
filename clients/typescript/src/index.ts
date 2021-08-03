@@ -21,5 +21,3 @@ export class VoodooClient extends WebSocket {
 }
 
 export * as protocol from './lib/protocol';
-
-// vim: sw=4 ts=4 et
