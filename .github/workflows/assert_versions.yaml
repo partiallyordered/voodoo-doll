@@ -4,7 +4,6 @@ on:
   push:
     branches:
     - '**'
-  pull_request:
 
 jobs:
   main:
@@ -20,6 +19,8 @@ jobs:
       run: jq '.version' clients/typescript/package.json -r >> versions
     - name: Get k8s manifest version
       run: jq '.spec.containers[] | select(.name == "app") | .image | split(":")[1]' -r kubernetes/pod.json >> versions
+    - name: Print versions
+      run: cat versions
     - name: Assert there is only one version
       run: '[[ $(uniq < versions | wc -l) == 1 ]]'
 
