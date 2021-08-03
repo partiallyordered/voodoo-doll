@@ -1,4 +1,4 @@
-# voodoo-client
+# mojaloop-voodoo-client
 
 A client for https://github.com/partiallyordered/voodoo-doll
 
@@ -6,14 +6,14 @@ Nodejs-only, due to dependency on the `ws` websockets library.
 
 ### Installation
 ```sh
-npm i -S voodoo-client
+npm i -S mojaloop-voodoo-client
 ```
 
 ### Usage
 #### Typescript
 ```typescript
-import type { ClientMessage } from 'voodoo-client';
-import { VoodooClient, protocol } from 'voodoo-client';
+import type { ClientMessage } from 'mojaloop-voodoo-client';
+import { VoodooClient, protocol } from 'mojaloop-voodoo-client';
 
 // Port-forward voodoo-doll server to localhost:3030
 const ws = new VoodooClient(`ws://localhost:3030/voodoo`);
@@ -54,7 +54,7 @@ ws.on('error', function incoming(error) {
 
 #### Node
 ```javascript
-const voodoo_client = require('voodoo-client');
+const voodoo_client = require('mojaloop-voodoo-client');
 
 // Port-forward voodoo-doll server to localhost:3030
 const ws = new voodoo_client.VoodooClient(`ws://localhost:3030/voodoo`);
