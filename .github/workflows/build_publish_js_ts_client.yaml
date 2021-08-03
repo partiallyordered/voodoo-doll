@@ -18,10 +18,12 @@ jobs:
       with:
         node-version: '12.x'
         registry-url: 'https://registry.npmjs.org'
-    - run: cd clients/typescript
     - run: npm ci
+      working-directory: clients/typescript
     - run: npm run build
+      working-directory: clients/typescript
     - run: npm publish
+      working-directory: clients/typescript
       if: ${{ github.event_name == 'release' }}
       env:
         NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
