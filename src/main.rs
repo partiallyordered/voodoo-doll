@@ -400,6 +400,10 @@ async fn client_message(
             // TODO: it's pretty obvious that the client will want the hub accounts created. We
             // could probably just do that? If anyone ever doesn't want the hub accounts created
             // first, we'll get a PR.
+            // TODO: optionally accept participant names
+            // TODO: ensure we return participants in the same order they're sent in. E.g. if the
+            // client requests an MMK participant and an SEK participant, in that order, the result
+            // should be an array containing participants with those properties, in that order.
             if let Some(client_data) = clients.write().await.get_mut(&client_id) {
                 let mut new_participants: Vec<protocol::ClientParticipant> = Vec::new();
 
