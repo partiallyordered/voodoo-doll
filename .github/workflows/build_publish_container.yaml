@@ -43,9 +43,6 @@ jobs:
         #   1.2
         #   latest
         # For non-releases, we'll produce a long sha
-        # Semver pre-release versions are also supported
-        # See also:
-        # https://github.com/crazy-max/ghaction-docker-meta/tree/0a412843f87333854fa03a809b74056b64c6f31a#handle-semver-tag
         flavor: |
           latest=${{ github.event_name == 'release' }}
         tags: |
