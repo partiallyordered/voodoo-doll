@@ -298,7 +298,7 @@ export type ServerMessage =
   | { type: "AssignParticipants"; value: ClientParticipant[] }
   | { type: "HubAccountsCreated"; value: Currency[] };
 
-export type ClientMessage =
-  | { type: "Transfers"; value: TransferMessage[] }
-  | { type: "CreateHubAccounts"; value: Currency[]; }
-  | { type: "CreateParticipants"; value: AccountInitialization[] };
+export type ClientMessage = { type: "Transfers"; value: TransferMessage[] } | {
+  type: "CreateHubAccounts";
+  value: Currency[];
+} | { type: "CreateParticipants"; value: AccountInitialization[] };

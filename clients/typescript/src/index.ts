@@ -36,21 +36,21 @@ export class VoodooClient extends WebSocket {
     }
 
     // Exchange a single request-response pair with the server
-    exchange(
+    exchange<ServerResponse extends protocol.ServerMessage['value']>(
         sendMsg: protocol.ClientMessage,
-        recvMsgType: protocol.ServerMessage['type'],
+        recvMsgDiscriminator: protocol.ServerMessage['type'],
         timeoutMs: number = 5000,
-    ) {
+    ): PromiseLike<ServerResponse> {
         return new Promise((resolve, reject) => {
-            const exchangeType = `${sendMsg.type}-${recvMsgType}`;
+            const exchangeType = `${sendMsg.type}-${recvMsgDiscriminator}`;
             trace(`Beginning ${exchangeType} exchange`);
             const t = setTimeout(
                 () => reject(`${exchangeType} exchange timed out after ${timeoutMs}ms`),
                 timeoutMs
             );
 
-            this.once(recvMsgType, (m: protocol.ServerMessage['value']) => {
-                trace(`Received ${recvMsgType} message for ${exchangeType} exchange`);
+            this.once(recvMsgDiscriminator, (m: ServerResponse) => {
+                trace(`Received ${recvMsgDiscriminator} message for ${exchangeType} exchange`);
                 clearTimeout(t);
                 resolve(m);
             });
@@ -76,7 +76,7 @@ export class VoodooClient extends WebSocket {
         participants: protocol.AccountInitialization[],
         timeoutMs: number = 5000,
     ) {
-        return this.exchange(
+        return this.exchange<protocol.ClientParticipant[]>(
             {
                 type: "CreateParticipants",
                 value: participants,
@@ -90,7 +90,7 @@ export class VoodooClient extends WebSocket {
         currencies: protocol.Currency[],
         timeoutMs: number = 5000,
     ) {
-        return this.exchange(
+        return this.exchange<protocol.Currency[]>(
             {
                 type: "CreateHubAccounts",
                 value: currencies,
@@ -104,7 +104,7 @@ export class VoodooClient extends WebSocket {
         transfers: protocol.TransferMessage[],
         timeoutMs: number = 5000,
     ) {
-        return this.exchange(
+        return this.exchange<protocol.TransferCompleteMessage>(
             {
                 type: "Transfers",
                 value: transfers,

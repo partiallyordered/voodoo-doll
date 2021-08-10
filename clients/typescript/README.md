@@ -43,7 +43,7 @@ const transfers: protocol.TransferMessage[] = [{
 await client.completeTransfers(transfers);
 ```
 
-#### Node
+#### Javascript
 ```javascript
 const voodoo_client = require('mojaloop-voodoo-client');
 
