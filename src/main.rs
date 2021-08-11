@@ -14,6 +14,8 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use warp::ws::{Message, WebSocket};
 use warp::Filter;
 use thiserror::Error;
+use regex::Regex;
+use lazy_static::lazy_static;
 
 use fspiox_api::*;
 mod protocol;
@@ -570,34 +572,52 @@ async fn client_message(
         protocol::ClientMessage::CreateSettlementModel(settlement_model) => {
             if let Some(client_data) = clients.write().await.get_mut(&client_id) {
                 use mojaloop_api::central_ledger::settlement_models;
+
+                let success_response_text = serde_json::to_string(
+                    &protocol::ServerMessage::SettlementModelCreated(
+                        protocol::SettlementModelCreatedMessage {
+                            settlement_model: settlement_model.clone()
+                        }
+                    )).unwrap();
+
                 let settlement_model_create_req = reqwest::Request::try_from(
                     to_request(
                         settlement_models::PostSettlementModel {
-                            settlement_model: settlement_model.clone()
+                            settlement_model
                         },
-                        "http://centralledger-service",
+                        "http://localhost:3001",
                     ).map_err(|_| VoodooError::InvalidUrl)?
                 ).map_err(|_| VoodooError::RequestConversionError)?;
-                let result = http_client.execute(settlement_model_create_req).await
-                    .map_err(|e| VoodooError::FailedToCreateSettlementModel(e.to_string()))?
-                    .json::<MlApiResponse<Empty>>().await
-                    .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
 
-                match result {
-                    MlApiResponse::Err(ml_err) => {
-                        println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", ml_err);
-                    },
-                    MlApiResponse::Response(_) => {
-                        let msg_text = serde_json::to_string(
-                            &protocol::ServerMessage::SettlementModelCreated(
-                                protocol::SettlementModelCreatedMessage {
-                                    settlement_model
-                                }
-                            )).unwrap();
-                        if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg_text))) {
+                let result = http_client.execute(settlement_model_create_req).await
+                    .map_err(|e| VoodooError::FailedToCreateSettlementModel(e.to_string()))?;
+
+                if result.status() == 201 {
+                    if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(success_response_text))) {
+                        // Disconnect handled elsewhere
+                        println!("Client disconnected, failed to send");
+                    }
+                } else {
+                    let result = result
+                        .json::<fspiox_api::common::ErrorResponse>().await
+                        .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
+                    lazy_static! {
+                        static ref RE: Regex = Regex::new(r".*Settlement model.*already exists.*").unwrap();
+                    }
+                    if result.error_information.error_code == common::MojaloopApiError::InternalServerError &&
+                        RE.is_match(&result.error_information.error_description) {
+                        // TODO: this is actually an error that the client should be
+                        // informed of. The switch has simply said "there has been a name
+                        // clash- you asked for a settlement model name that already
+                        // existed". At the time of writing, ignoring this case is
+                        // desirable, however this is certainly not the general case, and
+                        // this should be handled, and an error returned to the client.
+                        if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(success_response_text))) {
                             // Disconnect handled elsewhere
                             println!("Client disconnected, failed to send");
                         }
+                    } else {
+                        println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", result);
                     }
                 }
             } else {
