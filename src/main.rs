@@ -38,6 +38,8 @@ enum VoodooError {
     ParticipantInit(String),
     #[error("Failed to create participant: {0}")]
     ParticipantCreation(String),
+    #[error("Failed to create settlement model: {0}")]
+    FailedToCreateSettlementModel(String),
 }
 
 type Result<T> = std::result::Result<T, VoodooError>;
@@ -576,18 +578,27 @@ async fn client_message(
                         "http://centralledger-service",
                     ).map_err(|_| VoodooError::InvalidUrl)?
                 ).map_err(|_| VoodooError::RequestConversionError)?;
-                http_client.execute(settlement_model_create_req).await
-                    .map_err(|e| VoodooError::FailedToSetParticipantEndpoint(e.to_string()))?;
+                let result = http_client.execute(settlement_model_create_req).await
+                    .map_err(|e| VoodooError::FailedToCreateSettlementModel(e.to_string()))?
+                    .json::<MlApiResponse<Empty>>().await
+                    .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
 
-                let msg_text = serde_json::to_string(
-                    &protocol::ServerMessage::SettlementModelCreated(
-                        protocol::SettlementModelCreatedMessage {
-                            settlement_model
+                match result {
+                    MlApiResponse::Err(ml_err) => {
+                        println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", ml_err);
+                    },
+                    MlApiResponse::Response(_) => {
+                        let msg_text = serde_json::to_string(
+                            &protocol::ServerMessage::SettlementModelCreated(
+                                protocol::SettlementModelCreatedMessage {
+                                    settlement_model
+                                }
+                            )).unwrap();
+                        if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg_text))) {
+                            // Disconnect handled elsewhere
+                            println!("Client disconnected, failed to send");
                         }
-                    )).unwrap();
-                if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg_text))) {
-                    // Disconnect handled elsewhere
-                    println!("Client disconnected, failed to send");
+                    }
                 }
             } else {
                 // TODO: we should return something to the client indicating an error
