@@ -15,13 +15,13 @@ tokio-stream = { version = "0.1.6" }
 hyper = "0.14"
 warp = "0.3"
 futures = "0.3"
-fspiox-api = { git = "https://github.com/partiallyordered/fspiox-api", rev = "73f6e2d84f2f225bf5842d698c59244465a29980", features = ["fsp_http", "typescript_types"] }
+fspiox-api = { git = "https://github.com/partiallyordered/fspiox-api", rev = "3ba972632c9c4d8d4b2890780de805bf6e633c69", features = ["fsp_http", "typescript_types"] }
 # fspiox-api = { path = "/home/msk/projects/github.com/msk-/fspiox-api/", features = ["fsp_http", "typescript_types"] }
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
-mojaloop-api = { git = "https://github.com/partiallyordered/mojaloop-api", rev = "28d30b9ad43d2f65e679d9f73a22f793e23bf185" }
-# mojaloop-api = { path = "/home/msk/projects/github.com/msk-/mojaloop-api/" }
+mojaloop-api = { git = "https://github.com/partiallyordered/mojaloop-api", rev = "b5fac405286c6d35bed097490592234d5ab24ca9", features = ["typescript_types"] }
+# mojaloop-api = { path = "/home/msk/projects/github.com/msk-/mojaloop-api/", features = ["typescript_types"] }
 gethostname = "0.2"
 thiserror = "1.0"
 strum = "0.21"

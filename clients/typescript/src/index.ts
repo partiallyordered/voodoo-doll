@@ -21,9 +21,16 @@ export class VoodooClient extends WebSocket {
                 case 'HubAccountsCreated':
                 case 'TransferComplete':
                 case 'TransferError':
+                case 'SettlementModelCreated':
                     this.emit(m.type, m.value);
                     break;
                 default: {
+                    // Did you get a compile error here? This code is written such that if every
+                    // case in the above switch state is not handled, compilation will fail. Why?
+                    // Well, as a matter of fact, we can receive a message that is not of the type
+                    // we're interested in, but when we receive a message of the type we _are_
+                    // interested in, we want to be sure we've handled it and emitted it to our
+                    // listeners as a correctly typed event.
                     const exhaustiveCheck: never = m;
                     throw new Error(`Unhandled message type: ${exhaustiveCheck}`);
                 }
@@ -110,6 +117,20 @@ export class VoodooClient extends WebSocket {
                 value: transfers,
             },
             "TransferComplete",
+            timeoutMs,
+        );
+    }
+
+    createSettlementModel(
+        model: protocol.SettlementModel,
+        timeoutMs: number = 5000,
+    ) {
+        return this.exchange<protocol.SettlementModelCreatedMessage>(
+            {
+                type: "CreateSettlementModel",
+                value: model,
+            },
+            "SettlementModelCreated",
             timeoutMs,
         );
     }
