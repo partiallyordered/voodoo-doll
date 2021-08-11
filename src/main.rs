@@ -326,6 +326,7 @@ async fn client_message(
     let msg_de: protocol::ClientMessage = serde_json::from_str(msg)
         .map_err(|_| VoodooError::WebsocketMessageDeserializeFailed)?;
 
+    use mojaloop_api::common::to_request;
     use mojaloop_api::central_ledger::participants;
     use std::convert::TryFrom;
 
@@ -352,7 +353,7 @@ async fn client_message(
                     for r#type in [participants::HubAccountType::HubReconciliation, participants::HubAccountType::HubMultilateralSettlement].iter() {
                         let create_account_req =
                             reqwest::Request::try_from(
-                                participants::to_request(
+                                to_request(
                                     participants::PostHubAccount {
                                         name: "Hub".to_string(),
                                         account: participants::HubAccount {
@@ -396,10 +397,11 @@ async fn client_message(
                 println!("No client data found for connection!");
             }
         }
+
         protocol::ClientMessage::CreateParticipants(create_participants_message) => {
-            // TODO: it's pretty obvious that the client will want the hub accounts created. We
-            // could probably just do that? If anyone ever doesn't want the hub accounts created
-            // first, we'll get a PR.
+            // TODO: it's pretty obvious that the client will want the hub accounts and settlement
+            // modelcreated. We could probably just do that? If anyone ever doesn't want the hub
+            // accounts created first, we'll get a PR.
             // TODO: optionally accept participant names
             // TODO: ensure we return participants in the same order they're sent in. E.g. if the
             // client requests an MMK participant and an SEK participant, in that order, the result
@@ -427,7 +429,7 @@ async fn client_message(
 
                     let new_participant_req =
                         reqwest::Request::try_from(
-                            participants::to_request(
+                            to_request(
                                 participants::PostParticipant {
                                     participant: participants::NewParticipant {
                                         currency: account_init.currency,
@@ -449,7 +451,7 @@ async fn client_message(
                         MlApiResponse::Response(new_participant) => {
                             let participant_init_req =
                                 reqwest::Request::try_from(
-                                    participants::to_request(
+                                    to_request(
                                         participants::PostInitialPositionAndLimits {
                                             initial_position_and_limits: participants::InitialPositionAndLimits {
                                                 currency: account_init.currency,
@@ -492,8 +494,6 @@ async fn client_message(
         }
 
         protocol::ClientMessage::Transfers(transfers_message) => {
-            use std::convert::TryFrom;
-
             for transfer in transfers_message.iter() {
                 // TODO: check all transfer preconditions (optionally)? I.e.:
                 //       - hub has correct currency accounts
@@ -506,7 +506,7 @@ async fn client_message(
                     println!("Overriding endpoints for {}", participant);
                     use strum::IntoEnumIterator;
                     for callback_type in participants::FspiopCallbackType::iter() {
-                        let request = participants::to_request(
+                        let request = to_request(
                             participants::PostCallbackUrl {
                                 name: (*participant).clone(),
                                 callback_type,
@@ -563,6 +563,36 @@ async fn client_message(
             //
             // - this could all take forever, for whatever reason, there should probably be a
             //   timeout, nonconfigurable at first
+        }
+
+        protocol::ClientMessage::CreateSettlementModel(settlement_model) => {
+            if let Some(client_data) = clients.write().await.get_mut(&client_id) {
+                use mojaloop_api::central_ledger::settlement_models;
+                let settlement_model_create_req = reqwest::Request::try_from(
+                    to_request(
+                        settlement_models::PostSettlementModel {
+                            settlement_model: settlement_model.clone()
+                        },
+                        "http://centralledger-service",
+                    ).map_err(|_| VoodooError::InvalidUrl)?
+                ).map_err(|_| VoodooError::RequestConversionError)?;
+                http_client.execute(settlement_model_create_req).await
+                    .map_err(|e| VoodooError::FailedToSetParticipantEndpoint(e.to_string()))?;
+
+                let msg_text = serde_json::to_string(
+                    &protocol::ServerMessage::SettlementModelCreated(
+                        protocol::SettlementModelCreatedMessage {
+                            settlement_model
+                        }
+                    )).unwrap();
+                if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg_text))) {
+                    // Disconnect handled elsewhere
+                    println!("Client disconnected, failed to send");
+                }
+            } else {
+                // TODO: we should return something to the client indicating an error
+                println!("No client data found for connection!");
+            }
         }
     }
 

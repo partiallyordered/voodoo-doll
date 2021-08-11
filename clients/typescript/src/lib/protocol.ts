@@ -26,6 +26,32 @@ export interface TransferMessage {
   transfer_id: string;
 }
 
+export interface SettlementModelCreatedMessage {
+  settlement_model: SettlementModel;
+}
+
+export type SettlementAccountType = "SETTLEMENT" | "INTERCHANGE_FEE_SETTLEMENT";
+
+export type SettlementDelay = "DEFERRED" | "IMMEDIATE";
+
+export type SettlementGranularity = "GROSS" | "NET";
+
+export type SettlementInterchange = "BILATERAL" | "MULTILATERAL";
+
+export type LedgerAccountType = "INTERCHANGE_FEE" | "POSITION";
+
+export interface SettlementModel {
+  autoPositionReset: boolean;
+  ledgerAccountType: LedgerAccountType;
+  settlementAccountType: SettlementAccountType;
+  name: string;
+  requireLiquidityCheck: boolean;
+  settlementDelay: SettlementDelay;
+  settlementGranularity: SettlementGranularity;
+  settlementInterchange: SettlementInterchange;
+  currency: Currency;
+}
+
 export type DateTime = string;
 
 export type Amount = string;
@@ -296,9 +322,11 @@ export type ServerMessage =
   | { type: "TransferComplete"; value: TransferCompleteMessage }
   | { type: "TransferError"; value: TransferErrorMessage }
   | { type: "AssignParticipants"; value: ClientParticipant[] }
-  | { type: "HubAccountsCreated"; value: Currency[] };
+  | { type: "HubAccountsCreated"; value: Currency[] }
+  | { type: "SettlementModelCreated"; value: SettlementModelCreatedMessage };
 
-export type ClientMessage = { type: "Transfers"; value: TransferMessage[] } | {
-  type: "CreateHubAccounts";
-  value: Currency[];
-} | { type: "CreateParticipants"; value: AccountInitialization[] };
+export type ClientMessage =
+  | { type: "Transfers"; value: TransferMessage[] }
+  | { type: "CreateHubAccounts"; value: Currency[] }
+  | { type: "CreateParticipants"; value: AccountInitialization[] }
+  | { type: "CreateSettlementModel"; value: SettlementModel };
