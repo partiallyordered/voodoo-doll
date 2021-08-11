@@ -1,6 +1,6 @@
 {
   "name": "mojaloop-voodoo-client",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A client for https://github.com/partiallyordered/voodoo-doll",
   "main": "dist/index.js",
   "scripts": {
