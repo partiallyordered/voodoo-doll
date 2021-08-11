@@ -585,7 +585,7 @@ async fn client_message(
                         settlement_models::PostSettlementModel {
                             settlement_model
                         },
-                        "http://localhost:3001",
+                        "http://centralledger-service",
                     ).map_err(|_| VoodooError::InvalidUrl)?
                 ).map_err(|_| VoodooError::RequestConversionError)?;
 
