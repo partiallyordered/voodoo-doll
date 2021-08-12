@@ -17,6 +17,8 @@ jobs:
       with:
         node-version: '12.x'
         registry-url: 'https://registry.npmjs.org'
+    - name: Generate typescript protocol definition
+      run: cargo t --all-features
     - run: npm ci
       working-directory: clients/typescript
     # Not working at the time of writing. The error

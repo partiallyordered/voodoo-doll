@@ -53,7 +53,7 @@ export interface SettlementModel {
 }
 
 export interface HubAccount {
-  rType: HubAccountType;
+  type: HubAccountType;
   currency: Currency;
 }
 
