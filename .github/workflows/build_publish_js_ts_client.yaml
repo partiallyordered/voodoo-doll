@@ -23,7 +23,7 @@ jobs:
       working-directory: clients/typescript
       run: |
         CURRENT_VERSION="$(jq '.version' package.json)"
-        npm version "$(CURRENT_VERSION)-$(git rev-parse HEAD)"
+        npm version "$CURRENT_VERSION-$(git rev-parse HEAD)"
     - run: npm run build
       working-directory: clients/typescript
     - run: npm publish
