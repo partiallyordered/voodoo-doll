@@ -24,6 +24,7 @@ jobs:
       run: |
         CURRENT_VERSION="$(jq '.version' package.json)"
         NEW_VERSION="$CURRENT_VERSION-$(git rev-parse HEAD)"
+        echo "New version: $NEW_VERSION"
         npm version "$NEW_VERSION"
     - run: npm run build
       working-directory: clients/typescript
