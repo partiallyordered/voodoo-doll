@@ -351,46 +351,43 @@ async fn client_message(
     struct Empty {}
 
     match msg_de {
-        protocol::ClientMessage::CreateHubAccounts(currencies) => {
+        protocol::ClientMessage::CreateHubAccounts(accounts) => {
             if let Some(client_data) = clients.write().await.get_mut(&client_id) {
-                for currency in &currencies {
-                    for r#type in [participants::HubAccountType::HubReconciliation, participants::HubAccountType::HubMultilateralSettlement].iter() {
-                        let create_account_req =
-                            reqwest::Request::try_from(
-                                to_request(
-                                    participants::PostHubAccount {
-                                        name: "Hub".to_string(),
-                                        account: participants::HubAccount {
-                                            currency: *currency,
-                                            r#type: *r#type,
-                                        }
-                                    },
-                                    "http://centralledger-service",
-                                ).map_err(|_| VoodooError::InvalidUrl)?
-                            ).map_err(|_| VoodooError::RequestConversionError)?;
-                        // TODO: we don't actually care about the json response here if the
-                        // response code was a 2xx. If it wasn't, we might be interested in the
-                        // following response:
-                        //   ErrorResponse {
-                        //     error_information: ErrorInformation {
-                        //       error_code: AddPartyInfoError,
-                        //       error_description: "Add Party information error - Hub account has already been registered."
-                        //     }
-                        //   }
-                        let result = http_client.execute(create_account_req).await
-                            .map_err(|e| VoodooError::ParticipantCreation(e.to_string()))?
-                            .json::<MlApiResponse<Empty>>().await
-                            .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
-                        match result {
-                            MlApiResponse::Err(ml_err) => {
-                                println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", ml_err);
-                            },
-                            MlApiResponse::Response(_) => {}
-                        }
+                for account in &accounts {
+                    let create_account_req =
+                        reqwest::Request::try_from(
+                            to_request(
+                                participants::PostHubAccount {
+                                    // TODO: need to get hub name from switch; older versions
+                                    // of ML use "hub" instead of "Hub".
+                                    name: "Hub".to_string(),
+                                    account: *account,
+                                },
+                                "http://centralledger-service",
+                            ).map_err(|_| VoodooError::InvalidUrl)?
+                        ).map_err(|_| VoodooError::RequestConversionError)?;
+                    // TODO: we don't actually care about the json response here if the
+                    // response code was a 2xx. If it wasn't, we might be interested in the
+                    // following response:
+                    //   ErrorResponse {
+                    //     error_information: ErrorInformation {
+                    //       error_code: AddPartyInfoError,
+                    //       error_description: "Add Party information error - Hub account has already been registered."
+                    //     }
+                    //   }
+                    let result = http_client.execute(create_account_req).await
+                        .map_err(|e| VoodooError::ParticipantCreation(e.to_string()))?
+                        .json::<MlApiResponse<Empty>>().await
+                        .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
+                    match result {
+                        MlApiResponse::Err(ml_err) => {
+                            println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", ml_err);
+                        },
+                        MlApiResponse::Response(_) => {}
                     }
                 }
                 let msg_text = serde_json::to_string(
-                    &protocol::ServerMessage::HubAccountsCreated(currencies)
+                    &protocol::ServerMessage::HubAccountsCreated(accounts)
                 ).unwrap();
                 if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg_text))) {
                     // Disconnect handled elsewhere
@@ -403,10 +400,12 @@ async fn client_message(
         }
 
         protocol::ClientMessage::CreateParticipants(create_participants_message) => {
-            // TODO: it's pretty obvious that the client will want the hub accounts and settlement
-            // modelcreated. We could probably just do that? If anyone ever doesn't want the hub
-            // accounts created first, we'll get a PR.
-            // TODO: optionally accept participant names
+            // TODO: it's pretty obvious that the client will want the hub RECONCILIATION accounts
+            // and settlement model created. We could probably just do that? If anyone ever doesn't
+            // want the hub accounts created first, we'll get a PR.
+            // TODO: optionally accept participant names. If the participant already exists, check
+            // if it's in our participant pool. If it is, check if it's been "issued" to another
+            // client. If it hasn't, "issue" it to the requester.
             // TODO: ensure we return participants in the same order they're sent in. E.g. if the
             // client requests an MMK participant and an SEK participant, in that order, the result
             // should be an array containing participants with those properties, in that order.
@@ -450,7 +449,7 @@ async fn client_message(
 
                     match new_participant {
                         MlApiResponse::Err(ml_err) => {
-                            println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", ml_err);
+                            println!("Whoopsie. TODO: let client know there was a problem creating the new participant. The problem: {:?}", ml_err);
                         },
                         MlApiResponse::Response(new_participant) => {
                             let participant_init_req =

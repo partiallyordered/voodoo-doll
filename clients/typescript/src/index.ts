@@ -94,13 +94,13 @@ export class VoodooClient extends WebSocket {
     }
 
     createHubAccounts(
-        currencies: protocol.Currency[],
+        accounts: protocol.HubAccount[],
         timeoutMs: number = 5000,
     ) {
-        return this.exchange<protocol.Currency[]>(
+        return this.exchange<protocol.HubAccount[]>(
             {
                 type: "CreateHubAccounts",
-                value: currencies,
+                value: accounts,
             },
             "HubAccountsCreated",
             timeoutMs,

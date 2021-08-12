@@ -2,6 +2,13 @@
 An in-cluster Mojaloop participant simulator intended for temporary deployment by mojo
 
 ### TODO
+- Versioned protocol. This is useful because it becomes possible to support older clients with
+    newer versions of voodoo-doll. So, for example, the client can simply check "is the server
+    version at least as new as me?". It should also mean that if a client detects a server version
+    that's too old, it can simply update the server version, with no/minimal risk of disrupting
+    other clients. *But* if there's any state in the server itself (there is) this could be
+    problematic. Can we store our config using k8s API? Or should this service share config with
+    itself using raft or something?
 - Implement a timeout for the service to shut itself down.
 - Make sure to correctly handle sigterm, sigkill, etc.
 - It should be possible to implement more complex scenarios as a state machine. Each event could
