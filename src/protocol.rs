@@ -1,11 +1,9 @@
 use fspiox_api::*;
-use mojaloop_api::central_ledger::settlement_models;
+use mojaloop_api::central_ledger::{participants, settlement_models};
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "typescript_types")]
 use ts_rs::{TS, export};
-#[cfg(feature = "typescript_types")]
-use std::any::TypeId;
 
 #[cfg_attr(feature = "typescript_types", derive(TS))]
 #[derive(Debug, Serialize, Deserialize)]
@@ -34,7 +32,7 @@ pub enum ClientMessage {
     /// Run end-to-end transfers
     Transfers(Vec<TransferMessage>),
     /// Create hub settlement and reconciliation accounts
-    CreateHubAccounts(Vec<common::Currency>),
+    CreateHubAccounts(Vec<participants::HubAccount>),
     // TODO: this _could_ be a vector of vectors of accounts. Each 0th-level vector would represent
     // a participant, and each 1st-level vector would contain desired accounts.
     /// Create a set of participants. Will be disabled when the socket disconnects.
@@ -76,7 +74,7 @@ pub enum ServerMessage {
     TransferComplete(TransferCompleteMessage),
     TransferError(TransferErrorMessage),
     AssignParticipants(Vec<ClientParticipant>),
-    HubAccountsCreated(Vec<common::Currency>),
+    HubAccountsCreated(Vec<participants::HubAccount>),
     SettlementModelCreated(SettlementModelCreatedMessage),
 }
 
@@ -94,6 +92,8 @@ export! {
     settlement_models::SettlementInterchange,
     settlement_models::LedgerAccountType,
     settlement_models::SettlementModel,
+    participants::HubAccount,
+    participants::HubAccountType,
     common::DateTime,
     common::Amount,
     common::Currency,

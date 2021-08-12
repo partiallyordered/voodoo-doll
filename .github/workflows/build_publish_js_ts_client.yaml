@@ -17,12 +17,26 @@ jobs:
       with:
         node-version: '12.x'
         registry-url: 'https://registry.npmjs.org'
+    - name: Generate typescript protocol definition
+      run: cargo t --all-features
     - run: npm ci
       working-directory: clients/typescript
+    # Not working at the time of writing. The error
+    # > npm ERR! 404 Not Found - PUT https://registry.npmjs.org/mojaloop-voodoo-client - Not found
+    # > npm ERR! 404 
+    # > npm ERR! 404  'mojaloop-voodoo-client@0.3.3-5458ad72dab7c9241bb922a8a3c893e7eedb328d' is not in the npm registry.
+    #
+    # - if: ${{ github.event_name != 'release' }}
+    #   working-directory: clients/typescript
+    #   run: |
+    #     CURRENT_VERSION="$(jq -r '.version' package.json)"
+    #     NEW_VERSION="$CURRENT_VERSION-$(git rev-parse HEAD)"
+    #     echo "New version: $NEW_VERSION"
+    #     npm version "$NEW_VERSION"
     - run: npm run build
       working-directory: clients/typescript
     - run: npm publish
-      working-directory: clients/typescript
       if: ${{ github.event_name == 'release' }}
+      working-directory: clients/typescript
       env:
         NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

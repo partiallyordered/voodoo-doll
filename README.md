@@ -2,6 +2,28 @@
 An in-cluster Mojaloop participant simulator intended for temporary deployment by mojo
 
 ### TODO
+- A release process that
+  - Puts the GH revision in the built artifacts
+  - Sets all the built artifact versions equal
+  - Allows only semver releases
+  - Either
+    1. prevents code with unchanged versions being merged
+        - Potentially annoying for things that don't change build outputs, e.g. a CI configuration
+            change.
+        - Means that all changes to the repo will be versioned. So if there are accidental changes,
+            e.g. the CI configuration change actually results in an unforeseen change in an artifact,
+            this change will be versioned somehow or other.
+    2. modifies the versions at release
+        - Easier to manage
+        - Potentially annoying to implement, because the release has to modify HEAD before building
+            artifacts, to keep versions aligned with the code they're built from.
+- Versioned protocol. This is useful because it becomes possible to support older clients with
+    newer versions of voodoo-doll. So, for example, the client can simply check "is the server
+    version at least as new as me?". It should also mean that if a client detects a server version
+    that's too old, it can simply update the server version, with no/minimal risk of disrupting
+    other clients. *But* if there's any state in the server itself (there is) this could be
+    problematic. Can we store our config using k8s API? Or should this service share config with
+    itself using raft or something?
 - Implement a timeout for the service to shut itself down.
 - Make sure to correctly handle sigterm, sigkill, etc.
 - It should be possible to implement more complex scenarios as a state machine. Each event could

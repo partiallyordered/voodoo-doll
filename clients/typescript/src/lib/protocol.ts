@@ -52,6 +52,15 @@ export interface SettlementModel {
   currency: Currency;
 }
 
+export interface HubAccount {
+  type: HubAccountType;
+  currency: Currency;
+}
+
+export type HubAccountType =
+  | "HUB_MULTILATERAL_SETTLEMENT"
+  | "HUB_RECONCILIATION";
+
 export type DateTime = string;
 
 export type Amount = string;
@@ -322,11 +331,11 @@ export type ServerMessage =
   | { type: "TransferComplete"; value: TransferCompleteMessage }
   | { type: "TransferError"; value: TransferErrorMessage }
   | { type: "AssignParticipants"; value: ClientParticipant[] }
-  | { type: "HubAccountsCreated"; value: Currency[] }
+  | { type: "HubAccountsCreated"; value: HubAccount[] }
   | { type: "SettlementModelCreated"; value: SettlementModelCreatedMessage };
 
 export type ClientMessage =
   | { type: "Transfers"; value: TransferMessage[] }
-  | { type: "CreateHubAccounts"; value: Currency[] }
+  | { type: "CreateHubAccounts"; value: HubAccount[] }
   | { type: "CreateParticipants"; value: AccountInitialization[] }
   | { type: "CreateSettlementModel"; value: SettlementModel };
