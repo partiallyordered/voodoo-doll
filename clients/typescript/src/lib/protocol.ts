@@ -30,6 +30,38 @@ export interface SettlementModelCreatedMessage {
   settlement_model: SettlementModel;
 }
 
+export type SettlementId = number;
+
+export type SettlementWindowState =
+  | "OPEN"
+  | "CLOSED"
+  | "PENDING_SETTLEMENT"
+  | "SETTLED"
+  | "ABORTED";
+
+export interface SettlementWindowContent {
+  id: SettlementWindowContentId;
+  state: SettlementWindowState;
+  ledgerAccountType: LedgerAccountType;
+  currencyId: Currency;
+  createdDate: DateTime;
+  changedDate: DateTime | null;
+  settlementId: SettlementId | null;
+}
+
+export interface SettlementWindow {
+  id: SettlementWindowId;
+  reason: string | null;
+  state: SettlementWindowState;
+  createdDate: DateTime;
+  changedDate: DateTime | null;
+  content: SettlementWindowContent[] | null;
+}
+
+export type SettlementWindowId = number;
+
+export type SettlementWindowContentId = number;
+
 export type SettlementAccountType = "SETTLEMENT" | "INTERCHANGE_FEE_SETTLEMENT";
 
 export type SettlementDelay = "DEFERRED" | "IMMEDIATE";
@@ -332,10 +364,12 @@ export type ServerMessage =
   | { type: "TransferError"; value: TransferErrorMessage }
   | { type: "AssignParticipants"; value: ClientParticipant[] }
   | { type: "HubAccountsCreated"; value: HubAccount[] }
-  | { type: "SettlementModelCreated"; value: SettlementModelCreatedMessage };
+  | { type: "SettlementModelCreated"; value: SettlementModelCreatedMessage }
+  | { type: "SettlementWindowsCreated"; value: SettlementWindowId[] };
 
 export type ClientMessage =
   | { type: "Transfers"; value: TransferMessage[] }
   | { type: "CreateHubAccounts"; value: HubAccount[] }
   | { type: "CreateParticipants"; value: AccountInitialization[] }
-  | { type: "CreateSettlementModel"; value: SettlementModel };
+  | { type: "CreateSettlementModel"; value: SettlementModel }
+  | { type: "CreateSettlementWindows"; value: TransferMessage[][] };

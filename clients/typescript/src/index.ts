@@ -22,6 +22,7 @@ export class VoodooClient extends WebSocket {
                 case 'TransferComplete':
                 case 'TransferError':
                 case 'SettlementModelCreated':
+                case 'SettlementWindowsCreated':
                     this.emit(m.type, m.value);
                     break;
                 default: {
@@ -131,6 +132,20 @@ export class VoodooClient extends WebSocket {
                 value: model,
             },
             "SettlementModelCreated",
+            timeoutMs,
+        );
+    }
+
+    createSettlementWindows(
+        transfers: protocol.TransferMessage[][],
+        timeoutMs: number = 5000,
+    ) {
+        return this.exchange<protocol.SettlementWindowId[]>(
+            {
+                type: "CreateSettlementWindows",
+                value: transfers,
+            },
+            "SettlementWindowsCreated",
             timeoutMs,
         );
     }

@@ -1,5 +1,6 @@
 use fspiox_api::*;
 use mojaloop_api::central_ledger::{participants, settlement_models};
+use mojaloop_api::settlement::settlement_windows;
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "typescript_types")]
@@ -35,10 +36,14 @@ pub enum ClientMessage {
     CreateHubAccounts(Vec<participants::HubAccount>),
     // TODO: this _could_ be a vector of vectors of accounts. Each 0th-level vector would represent
     // a participant, and each 1st-level vector would contain desired accounts.
+    // TODO: disable the participants on socket closure
     /// Create a set of participants. Will be disabled when the socket disconnects.
     CreateParticipants(Vec<AccountInitialization>),
     /// Create a settlement model
     CreateSettlementModel(settlement_models::SettlementModel),
+    /// Generate some closed settlement windows with the given transfers. Will close the currently
+    /// open settlement window if that contains any existing transfers.
+    CreateSettlementWindows(Vec<Vec<TransferMessage>>),
 }
 
 #[cfg_attr(feature = "typescript_types", derive(TS))]
@@ -76,6 +81,7 @@ pub enum ServerMessage {
     AssignParticipants(Vec<ClientParticipant>),
     HubAccountsCreated(Vec<participants::HubAccount>),
     SettlementModelCreated(SettlementModelCreatedMessage),
+    SettlementWindowsCreated(Vec<settlement_windows::SettlementWindowId>),
 }
 
 #[cfg(feature = "typescript_types")]
@@ -86,6 +92,12 @@ export! {
     ClientParticipant,
     TransferMessage,
     SettlementModelCreatedMessage,
+    mojaloop_api::settlement::settlement::SettlementId,
+    settlement_windows::SettlementWindowState,
+    settlement_windows::SettlementWindowContent,
+    settlement_windows::SettlementWindow,
+    settlement_windows::SettlementWindowId,
+    settlement_windows::SettlementWindowContentId,
     settlement_models::SettlementAccountType,
     settlement_models::SettlementDelay,
     settlement_models::SettlementGranularity,

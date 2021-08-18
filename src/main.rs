@@ -351,6 +351,11 @@ async fn client_message(
     struct Empty {}
 
     match msg_de {
+        protocol::ClientMessage::CreateSettlementWindows(settlements) => {
+            for s in settlements {
+
+            }
+        }
         protocol::ClientMessage::CreateHubAccounts(accounts) => {
             if let Some(client_data) = clients.write().await.get_mut(&client_id) {
                 for account in &accounts {
