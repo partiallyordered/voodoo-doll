@@ -42,6 +42,8 @@ enum VoodooError {
     ParticipantCreation(String),
     #[error("Failed to create settlement model: {0}")]
     FailedToCreateSettlementModel(String),
+    #[error("Failed to close settlement window: {0}")]
+    SettlementWindowClose(String),
 }
 
 type Result<T> = std::result::Result<T, VoodooError>;
@@ -332,6 +334,7 @@ async fn client_message(
 
     use mojaloop_api::common::to_request;
     use mojaloop_api::central_ledger::participants;
+    use mojaloop_api::settlement::settlement_windows;
     use std::convert::TryFrom;
 
     // TODO: Get this at startup and panic if it fails. If it fails once, it will always fail.
@@ -351,11 +354,84 @@ async fn client_message(
     struct Empty {}
 
     match msg_de {
-        protocol::ClientMessage::CreateSettlementWindows(settlements) => {
-            for s in settlements {
-
+        protocol::ClientMessage::GetSettlementWindows(query_params) => {
+            if let Some(client_data) = clients.write().await.get_mut(&client_id) {
+                let get_windows_req =
+                    reqwest::Request::try_from(
+                        to_request(
+                            query_params,
+                            "http://centralsettlement-service",
+                        ).map_err(|_| VoodooError::InvalidUrl)?
+                    ).map_err(|_| VoodooError::RequestConversionError)?;
+                let result = http_client.execute(get_windows_req).await
+                    .map_err(|e| VoodooError::ParticipantCreation(e.to_string()))?
+                    .json::<MlApiResponse<settlement_windows::SettlementWindows>>().await
+                    .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
+                match result {
+                    MlApiResponse::Err(ml_err) => {
+                        println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", ml_err);
+                    },
+                    MlApiResponse::Response(resp) => {
+                        let msg_text = serde_json::to_string(
+                            &protocol::ServerMessage::SettlementWindows(resp)
+                        ).unwrap();
+                        if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg_text))) {
+                            // Disconnect handled elsewhere
+                            println!("Client disconnected, failed to send");
+                        }
+                    }
+                };
+            } else {
+                // TODO: we should return something to the client indicating an error
+                println!("No client data found for connection!");
             }
         }
+
+        protocol::ClientMessage::CloseSettlementWindow(close_msg) => {
+            if let Some(client_data) = clients.write().await.get_mut(&client_id) {
+                let close_window_req =
+                    reqwest::Request::try_from(
+                        to_request(
+                            settlement_windows::CloseSettlementWindow {
+                                id: close_msg.id,
+                                payload: settlement_windows::SettlementWindowClosurePayload {
+                                    reason: close_msg.reason,
+                                }
+                            },
+                            "http://centralsettlement-service",
+                        ).map_err(|_| VoodooError::InvalidUrl)?
+                    ).map_err(|_| VoodooError::RequestConversionError)?;
+                let result = http_client.execute(close_window_req).await
+                    .map_err(|e| VoodooError::SettlementWindowClose(e.to_string()))?
+                    .json::<MlApiResponse<Empty>>().await
+                    .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
+                let msg_text = match result {
+                    MlApiResponse::Err(ml_err) => {
+                        serde_json::to_string(
+                            &protocol::ServerMessage::SettlementWindowCloseFailed(
+                                protocol::SettlementWindowCloseFailedMessage {
+                                    id: close_msg.id,
+                                    response: ml_err,
+                                }
+                            )
+                        ).unwrap()
+                    },
+                    MlApiResponse::Response(_) => {
+                        serde_json::to_string(
+                            &protocol::ServerMessage::SettlementWindowClosed(close_msg.id)
+                        ).unwrap()
+                    }
+                };
+                if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg_text))) {
+                    // Disconnect handled elsewhere
+                    println!("Client disconnected, failed to send");
+                }
+            } else {
+                // TODO: we should return something to the client indicating an error
+                println!("No client data found for connection!");
+            }
+        }
+
         protocol::ClientMessage::CreateHubAccounts(accounts) => {
             if let Some(client_data) = clients.write().await.get_mut(&client_id) {
                 for account in &accounts {
@@ -365,7 +441,7 @@ async fn client_message(
                                 participants::PostHubAccount {
                                     // TODO: need to get hub name from switch; older versions
                                     // of ML use "hub" instead of "Hub".
-                                    name: "Hub".to_string(),
+                                    name: common::FspId::from("Hub").unwrap(),
                                     account: *account,
                                 },
                                 "http://centralledger-service",
@@ -433,7 +509,7 @@ async fn client_message(
                         .map(char::from)
                         .take(24)
                         .collect();
-                    let name = format!("voodoo{}", name_suffix);
+                    let name = common::FspId::from(format!("voodoo{}", name_suffix).as_str()).unwrap();
 
                     let new_participant_req =
                         reqwest::Request::try_from(
@@ -441,7 +517,7 @@ async fn client_message(
                                 participants::PostParticipant {
                                     participant: participants::NewParticipant {
                                         currency: account_init.currency,
-                                        name: name.clone(),
+                                        name,
                                     },
                                 },
                                 "http://centralledger-service",
@@ -469,7 +545,7 @@ async fn client_message(
                                                 },
                                                 initial_position: account_init.initial_position,
                                             },
-                                            name: name.clone(),
+                                            name,
                                         },
                                         "http://centralledger-service",
                                     ).map_err(|_| VoodooError::InvalidUrl)?
@@ -516,7 +592,7 @@ async fn client_message(
                     for callback_type in participants::FspiopCallbackType::iter() {
                         let request = to_request(
                             participants::PostCallbackUrl {
-                                name: (*participant).clone(),
+                                name: **participant,
                                 callback_type,
                                 // TODO: strip trailing slash
                                 hostname: my_address.clone(),

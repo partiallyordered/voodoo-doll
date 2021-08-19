@@ -14,13 +14,13 @@ export interface AccountInitialization {
 }
 
 export interface ClientParticipant {
-  name: string;
+  name: FspId;
   account: AccountInitialization;
 }
 
 export interface TransferMessage {
-  msg_sender: string;
-  msg_recipient: string;
+  msg_sender: FspId;
+  msg_recipient: FspId;
   currency: Currency;
   amount: Amount;
   transfer_id: string;
@@ -28,6 +28,16 @@ export interface TransferMessage {
 
 export interface SettlementModelCreatedMessage {
   settlement_model: SettlementModel;
+}
+
+export interface SettlementWindowCloseMessage {
+  id: SettlementWindowId;
+  reason: string;
+}
+
+export interface SettlementWindowCloseFailedMessage {
+  id: SettlementWindowId;
+  response: ErrorResponse;
 }
 
 export type SettlementId = number;
@@ -62,6 +72,14 @@ export type SettlementWindowId = number;
 
 export type SettlementWindowContentId = number;
 
+export interface GetSettlementWindows {
+  currency: Currency | null;
+  participantId: FspId | null;
+  state: SettlementWindowState | null;
+  fromDateTime: DateTime | null;
+  toDateTime: DateTime | null;
+}
+
 export type SettlementAccountType = "SETTLEMENT" | "INTERCHANGE_FEE_SETTLEMENT";
 
 export type SettlementDelay = "DEFERRED" | "IMMEDIATE";
@@ -92,6 +110,8 @@ export interface HubAccount {
 export type HubAccountType =
   | "HUB_MULTILATERAL_SETTLEMENT"
   | "HUB_RECONCILIATION";
+
+export type FspId = string;
 
 export type DateTime = string;
 
@@ -365,11 +385,17 @@ export type ServerMessage =
   | { type: "AssignParticipants"; value: ClientParticipant[] }
   | { type: "HubAccountsCreated"; value: HubAccount[] }
   | { type: "SettlementModelCreated"; value: SettlementModelCreatedMessage }
-  | { type: "SettlementWindowsCreated"; value: SettlementWindowId[] };
+  | { type: "SettlementWindowClosed"; value: SettlementWindowId }
+  | {
+    type: "SettlementWindowCloseFailed";
+    value: SettlementWindowCloseFailedMessage;
+  }
+  | { type: "SettlementWindows"; value: SettlementWindow[] };
 
 export type ClientMessage =
   | { type: "Transfers"; value: TransferMessage[] }
   | { type: "CreateHubAccounts"; value: HubAccount[] }
   | { type: "CreateParticipants"; value: AccountInitialization[] }
   | { type: "CreateSettlementModel"; value: SettlementModel }
-  | { type: "CreateSettlementWindows"; value: TransferMessage[][] };
+  | { type: "CloseSettlementWindow"; value: SettlementWindowCloseMessage }
+  | { type: "GetSettlementWindows"; value: GetSettlementWindows };

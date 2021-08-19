@@ -27,6 +27,13 @@ pub struct AccountInitialization {
 }
 
 #[cfg_attr(feature = "typescript_types", derive(TS))]
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SettlementWindowCloseMessage {
+    pub id: settlement_windows::SettlementWindowId,
+    pub reason: String,
+}
+
+#[cfg_attr(feature = "typescript_types", derive(TS))]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "value")]
 pub enum ClientMessage {
@@ -41,9 +48,14 @@ pub enum ClientMessage {
     CreateParticipants(Vec<AccountInitialization>),
     /// Create a settlement model
     CreateSettlementModel(settlement_models::SettlementModel),
-    /// Generate some closed settlement windows with the given transfers. Will close the currently
-    /// open settlement window if that contains any existing transfers.
-    CreateSettlementWindows(Vec<Vec<TransferMessage>>),
+    /// Attempt to close the currently open settlement window. Will fail if the window does not
+    /// contain any transfers.
+    CloseSettlementWindow(SettlementWindowCloseMessage),
+    /// Get current settlement windows
+    GetSettlementWindows(settlement_windows::GetSettlementWindows),
+    // /// Generate some closed settlement windows with the given transfers. Will close the currently
+    // /// open settlement window if that contains any existing transfers.
+    // CreateSettlementWindows(Vec<Vec<TransferMessage>>),
 }
 
 #[cfg_attr(feature = "typescript_types", derive(TS))]
@@ -74,6 +86,13 @@ pub struct ClientParticipant {
 
 #[cfg_attr(feature = "typescript_types", derive(TS))]
 #[derive(Debug, Serialize, Deserialize)]
+pub struct SettlementWindowCloseFailedMessage {
+    pub id: settlement_windows::SettlementWindowId,
+    pub response: fspiox_api::common::ErrorResponse,
+}
+
+#[cfg_attr(feature = "typescript_types", derive(TS))]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "value")]
 pub enum ServerMessage {
     TransferComplete(TransferCompleteMessage),
@@ -81,7 +100,9 @@ pub enum ServerMessage {
     AssignParticipants(Vec<ClientParticipant>),
     HubAccountsCreated(Vec<participants::HubAccount>),
     SettlementModelCreated(SettlementModelCreatedMessage),
-    SettlementWindowsCreated(Vec<settlement_windows::SettlementWindowId>),
+    SettlementWindowClosed(settlement_windows::SettlementWindowId),
+    SettlementWindowCloseFailed(SettlementWindowCloseFailedMessage),
+    SettlementWindows(Vec<settlement_windows::SettlementWindow>),
 }
 
 #[cfg(feature = "typescript_types")]
@@ -92,12 +113,15 @@ export! {
     ClientParticipant,
     TransferMessage,
     SettlementModelCreatedMessage,
+    SettlementWindowCloseMessage,
+    SettlementWindowCloseFailedMessage,
     mojaloop_api::settlement::settlement::SettlementId,
     settlement_windows::SettlementWindowState,
     settlement_windows::SettlementWindowContent,
     settlement_windows::SettlementWindow,
     settlement_windows::SettlementWindowId,
     settlement_windows::SettlementWindowContentId,
+    settlement_windows::GetSettlementWindows,
     settlement_models::SettlementAccountType,
     settlement_models::SettlementDelay,
     settlement_models::SettlementGranularity,
@@ -106,6 +130,7 @@ export! {
     settlement_models::SettlementModel,
     participants::HubAccount,
     participants::HubAccountType,
+    common::FspId,
     common::DateTime,
     common::Amount,
     common::Currency,

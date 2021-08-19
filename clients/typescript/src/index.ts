@@ -22,7 +22,9 @@ export class VoodooClient extends WebSocket {
                 case 'TransferComplete':
                 case 'TransferError':
                 case 'SettlementModelCreated':
-                case 'SettlementWindowsCreated':
+                case 'SettlementWindowClosed':
+                case 'SettlementWindowCloseFailed':
+                case 'SettlementWindows':
                     this.emit(m.type, m.value);
                     break;
                 default: {
@@ -136,16 +138,30 @@ export class VoodooClient extends WebSocket {
         );
     }
 
-    createSettlementWindows(
-        transfers: protocol.TransferMessage[][],
+    getSettlementWindows(
+        params: protocol.GetSettlementWindows,
         timeoutMs: number = 5000,
     ) {
-        return this.exchange<protocol.SettlementWindowId[]>(
+        return this.exchange<protocol.SettlementWindow[]>(
             {
-                type: "CreateSettlementWindows",
-                value: transfers,
+                type: "GetSettlementWindows",
+                value: params,
             },
-            "SettlementWindowsCreated",
+            "SettlementWindows",
+            timeoutMs,
+        );
+    }
+
+    closeSettlementWindow(
+        payload: protocol.SettlementWindowCloseMessage,
+        timeoutMs: number = 5000,
+    ) {
+        return this.exchange<protocol.SettlementWindowId>(
+            {
+                type: "CloseSettlementWindow",
+                value: payload,
+            },
+            "SettlementWindowClosed",
             timeoutMs,
         );
     }
