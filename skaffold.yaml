@@ -6,7 +6,7 @@ build:
   artifacts:
   - image: ghcr.io/partiallyordered/voodoo-doll
     docker:
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dev
 deploy:
   kustomize:
     paths:

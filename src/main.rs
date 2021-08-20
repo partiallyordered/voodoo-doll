@@ -363,6 +363,7 @@ async fn client_message(
                             "http://centralsettlement-service",
                         ).map_err(|_| VoodooError::InvalidUrl)?
                     ).map_err(|_| VoodooError::RequestConversionError)?;
+                println!("Get settlement windows request: {:?}", get_windows_req);
                 let result = http_client.execute(get_windows_req).await
                     .map_err(|e| VoodooError::ParticipantCreation(e.to_string()))?
                     .json::<MlApiResponse<settlement_windows::SettlementWindows>>().await
@@ -395,6 +396,7 @@ async fn client_message(
                             settlement_windows::CloseSettlementWindow {
                                 id: close_msg.id,
                                 payload: settlement_windows::SettlementWindowClosurePayload {
+                                    state: settlement_windows::SettlementWindowCloseState::Closed,
                                     reason: close_msg.reason,
                                 }
                             },
