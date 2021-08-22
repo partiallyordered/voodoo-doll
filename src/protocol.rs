@@ -1,6 +1,6 @@
 use fspiox_api::*;
 use mojaloop_api::central_ledger::{participants, settlement_models};
-use mojaloop_api::settlement::settlement_windows;
+use mojaloop_api::settlement::{settlement, settlement_windows};
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "typescript_types")]
@@ -51,8 +51,10 @@ pub enum ClientMessage {
     /// Attempt to close the currently open settlement window. Will fail if the window does not
     /// contain any transfers.
     CloseSettlementWindow(SettlementWindowCloseMessage),
-    /// Get current settlement windows
+    /// Get settlement windows
     GetSettlementWindows(settlement_windows::GetSettlementWindows),
+    /// Get settlements
+    GetSettlements(settlement::GetSettlements),
     // /// Generate some closed settlement windows with the given transfers. Will close the currently
     // /// open settlement window if that contains any existing transfers.
     // CreateSettlementWindows(Vec<Vec<TransferMessage>>),
@@ -103,6 +105,7 @@ pub enum ServerMessage {
     SettlementWindowClosed(settlement_windows::SettlementWindowId),
     SettlementWindowCloseFailed(SettlementWindowCloseFailedMessage),
     SettlementWindows(Vec<settlement_windows::SettlementWindow>),
+    Settlements(settlement::Settlements),
 }
 
 #[cfg(feature = "typescript_types")]
@@ -115,7 +118,6 @@ export! {
     SettlementModelCreatedMessage,
     SettlementWindowCloseMessage,
     SettlementWindowCloseFailedMessage,
-    mojaloop_api::settlement::settlement::SettlementId,
     settlement_windows::SettlementWindowState,
     settlement_windows::SettlementWindowContent,
     settlement_windows::SettlementWindow,
@@ -128,6 +130,15 @@ export! {
     settlement_models::SettlementInterchange,
     settlement_models::LedgerAccountType,
     settlement_models::SettlementModel,
+    settlement::GetSettlements,
+    settlement::Settlement,
+    settlement::SettlementId,
+    settlement::SettlementState,
+    settlement::SettlementParticipant,
+    settlement::SettlementAccount,
+    settlement::ParticipantId,
+    settlement::ParticipantCurrencyId,
+    settlement::NetSettlementAmount,
     participants::HubAccount,
     participants::HubAccountType,
     common::FspId,

@@ -40,8 +40,6 @@ export interface SettlementWindowCloseFailedMessage {
   response: ErrorResponse;
 }
 
-export type SettlementId = number;
-
 export type SettlementWindowState =
   | "OPEN"
   | "CLOSED"
@@ -60,7 +58,7 @@ export interface SettlementWindowContent {
 }
 
 export interface SettlementWindow {
-  id: SettlementWindowId;
+  settlementWindowId: SettlementWindowId;
   reason: string | null;
   state: SettlementWindowState;
   createdDate: DateTime;
@@ -99,6 +97,56 @@ export interface SettlementModel {
   settlementDelay: SettlementDelay;
   settlementGranularity: SettlementGranularity;
   settlementInterchange: SettlementInterchange;
+  currency: Currency;
+}
+
+export interface GetSettlements {
+  currency: Currency | null;
+  participantId: FspId | null;
+  settlementWindowId: SettlementWindowId | null;
+  state: SettlementState | null;
+  fromDateTime: DateTime | null;
+  toDateTime: DateTime | null;
+  fromSettlementWindowDateTime: DateTime | null;
+  toSettlementWindowDateTime: DateTime | null;
+}
+
+export interface Settlement {
+  id: SettlementId;
+  state: SettlementState;
+  settlementWindows: SettlementWindow[];
+  participants: SettlementParticipant[];
+}
+
+export type SettlementId = number;
+
+export type SettlementState =
+  | "PENDING_SETTLEMENT"
+  | "PS_TRANSFERS_RECORDED"
+  | "PS_TRANSFERS_RESERVED"
+  | "PS_TRANSFERS_COMMITTED"
+  | "SETTLING"
+  | "SETTLED"
+  | "ABORTED";
+
+export interface SettlementParticipant {
+  id: ParticipantId;
+  accounts: SettlementAccount[];
+}
+
+export interface SettlementAccount {
+  id: ParticipantCurrencyId;
+  reason: string;
+  state: SettlementState;
+  netSettlementAmount: NetSettlementAmount;
+}
+
+export type ParticipantId = number;
+
+export type ParticipantCurrencyId = number;
+
+export interface NetSettlementAmount {
+  amount: Amount;
   currency: Currency;
 }
 
@@ -390,7 +438,8 @@ export type ServerMessage =
     type: "SettlementWindowCloseFailed";
     value: SettlementWindowCloseFailedMessage;
   }
-  | { type: "SettlementWindows"; value: SettlementWindow[] };
+  | { type: "SettlementWindows"; value: SettlementWindow[] }
+  | { type: "Settlements"; value: Settlement[] };
 
 export type ClientMessage =
   | { type: "Transfers"; value: TransferMessage[] }
@@ -398,4 +447,5 @@ export type ClientMessage =
   | { type: "CreateParticipants"; value: AccountInitialization[] }
   | { type: "CreateSettlementModel"; value: SettlementModel }
   | { type: "CloseSettlementWindow"; value: SettlementWindowCloseMessage }
-  | { type: "GetSettlementWindows"; value: GetSettlementWindows };
+  | { type: "GetSettlementWindows"; value: GetSettlementWindows }
+  | { type: "GetSettlements"; value: GetSettlements };

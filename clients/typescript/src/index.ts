@@ -4,6 +4,8 @@ import * as url from 'url';
 
 const trace = (...args: any[]) => {}; // console.log(...args);
 
+const DEFAULT_TIMEOUT: number = 5000;
+
 // A websocket with
 // - typed 'message' event
 // - typed send
@@ -25,6 +27,7 @@ export class VoodooClient extends WebSocket {
                 case 'SettlementWindowClosed':
                 case 'SettlementWindowCloseFailed':
                 case 'SettlementWindows':
+                case 'Settlements':
                     this.emit(m.type, m.value);
                     break;
                 default: {
@@ -49,7 +52,7 @@ export class VoodooClient extends WebSocket {
     exchange<ServerResponse extends protocol.ServerMessage['value']>(
         sendMsg: protocol.ClientMessage,
         recvMsgDiscriminator: protocol.ServerMessage['type'],
-        timeoutMs: number = 5000,
+        timeoutMs: number = DEFAULT_TIMEOUT,
     ): PromiseLike<ServerResponse> {
         return new Promise((resolve, reject) => {
             const exchangeType = `${sendMsg.type}-${recvMsgDiscriminator}`;
@@ -84,7 +87,7 @@ export class VoodooClient extends WebSocket {
 
     createParticipants(
         participants: protocol.AccountInitialization[],
-        timeoutMs: number = 5000,
+        timeoutMs: number = DEFAULT_TIMEOUT,
     ) {
         return this.exchange<protocol.ClientParticipant[]>(
             {
@@ -98,7 +101,7 @@ export class VoodooClient extends WebSocket {
 
     createHubAccounts(
         accounts: protocol.HubAccount[],
-        timeoutMs: number = 5000,
+        timeoutMs: number = DEFAULT_TIMEOUT,
     ) {
         return this.exchange<protocol.HubAccount[]>(
             {
@@ -112,7 +115,7 @@ export class VoodooClient extends WebSocket {
 
     completeTransfers(
         transfers: protocol.TransferMessage[],
-        timeoutMs: number = 5000,
+        timeoutMs: number = DEFAULT_TIMEOUT,
     ) {
         return this.exchange<protocol.TransferCompleteMessage>(
             {
@@ -126,7 +129,7 @@ export class VoodooClient extends WebSocket {
 
     createSettlementModel(
         model: protocol.SettlementModel,
-        timeoutMs: number = 5000,
+        timeoutMs: number = DEFAULT_TIMEOUT,
     ) {
         return this.exchange<protocol.SettlementModelCreatedMessage>(
             {
@@ -140,7 +143,7 @@ export class VoodooClient extends WebSocket {
 
     getSettlementWindows(
         params: protocol.GetSettlementWindows,
-        timeoutMs: number = 5000,
+        timeoutMs: number = DEFAULT_TIMEOUT,
     ) {
         return this.exchange<protocol.SettlementWindow[]>(
             {
@@ -154,7 +157,7 @@ export class VoodooClient extends WebSocket {
 
     closeSettlementWindow(
         payload: protocol.SettlementWindowCloseMessage,
-        timeoutMs: number = 5000,
+        timeoutMs: number = DEFAULT_TIMEOUT,
     ) {
         return this.exchange<protocol.SettlementWindowId>(
             {
@@ -162,6 +165,20 @@ export class VoodooClient extends WebSocket {
                 value: payload,
             },
             "SettlementWindowClosed",
+            timeoutMs,
+        );
+    }
+
+    getSettlements(
+        payload: protocol.GetSettlements,
+        timeoutMs: number = DEFAULT_TIMEOUT,
+    ) {
+        return this.exchange<protocol.Settlement[]>(
+            {
+                type: "GetSettlements",
+                value: payload,
+            },
+            "Settlements",
             timeoutMs,
         );
     }

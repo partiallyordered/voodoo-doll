@@ -20,7 +20,7 @@ fspiox-api = { git = "https://github.com/partiallyordered/fspiox-api", rev = "ee
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
-mojaloop-api = { git = "https://github.com/partiallyordered/mojaloop-api", rev = "6271dc858a0716b71bed76bbb53a1d966f300a5a", features = ["typescript_types"] }
+mojaloop-api = { git = "https://github.com/partiallyordered/mojaloop-api", rev = "6a4c3ea4587b37ca67903d6c716c8f157db75656", features = ["typescript_types"] }
 # mojaloop-api = { path = "/home/msk/projects/github.com/msk-/mojaloop-api/", features = ["typescript_types"] }
 gethostname = "0.2"
 thiserror = "1.0"

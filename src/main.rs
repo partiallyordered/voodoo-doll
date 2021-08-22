@@ -22,28 +22,22 @@ mod protocol;
 
 #[derive(Error, Debug)]
 enum VoodooError {
+    // TODO: wherever we use ResponseConversionError, we should actually print the response that we
+    // couldn't deserialize. This makes debugging much, much easier.
     #[error("Couldn't deserialize switch response into expected type. Error: {0}")]
     ResponseConversionError(String),
     #[error("Couldn't convert from http::request to reqwest::Request")]
     RequestConversionError,
     #[error("Received a non-string websocket message from client")]
     NonStringWebsocketMessageReceived,
-    #[error("Unrecognised message received from client")]
-    WebsocketMessageDeserializeFailed,
+    #[error("Unrecognised message received from client. Error: {0}. Message: {1}")]
+    WebsocketMessageDeserializeFailed(String, String),
     #[error("Typed an invalid URL in the code. Need a unit test for this..")]
     InvalidUrl,
     #[error("HOST_IP environment variable not set")]
     HostIpNotFound,
-    #[error("Failed to set participant endpoint: {0}")]
-    FailedToSetParticipantEndpoint(String),
-    #[error("Failed to initialise participant: {0}")]
-    ParticipantInit(String),
-    #[error("Failed to create participant: {0}")]
-    ParticipantCreation(String),
-    #[error("Failed to create settlement model: {0}")]
-    FailedToCreateSettlementModel(String),
-    #[error("Failed to close settlement window: {0}")]
-    SettlementWindowClose(String),
+    #[error("HTTP error occurred while {0}. Error message: {1}.")]
+    HttpError(&'static str, String),
 }
 
 type Result<T> = std::result::Result<T, VoodooError>;
@@ -330,11 +324,11 @@ async fn client_message(
     let msg = msg.to_str().map_err(|_| VoodooError::NonStringWebsocketMessageReceived)?;
     println!("Message from client: {}", msg);
     let msg_de: protocol::ClientMessage = serde_json::from_str(msg)
-        .map_err(|_| VoodooError::WebsocketMessageDeserializeFailed)?;
+        .map_err(|e| VoodooError::WebsocketMessageDeserializeFailed(e.to_string(), msg.to_string()))?;
 
     use mojaloop_api::common::to_request;
     use mojaloop_api::central_ledger::participants;
-    use mojaloop_api::settlement::settlement_windows;
+    use mojaloop_api::settlement::{settlement, settlement_windows};
     use std::convert::TryFrom;
 
     // TODO: Get this at startup and panic if it fails. If it fails once, it will always fail.
@@ -354,6 +348,42 @@ async fn client_message(
     struct Empty {}
 
     match msg_de {
+        protocol::ClientMessage::GetSettlements(query_params) => {
+            if let Some(client_data) = clients.write().await.get_mut(&client_id) {
+                let get_settlements_req =
+                    reqwest::Request::try_from(
+                        to_request(
+                            query_params,
+                            "http://centralsettlement-service",
+                        ).map_err(|_| VoodooError::InvalidUrl)?
+                    ).map_err(|_| VoodooError::RequestConversionError)?;
+                println!("Get settlements request: {:?}", get_settlements_req);
+                let result = http_client.execute(get_settlements_req).await
+                    .map_err(|e| VoodooError::HttpError("retrieving settlements", e.to_string()))?;
+                let result_text = result.text().await.unwrap();
+                println!("Get settlements response: {:?}", result_text);
+                let result = serde_json::from_str::<MlApiResponse<settlement::Settlements>>(&result_text)
+                    .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
+                match result {
+                    MlApiResponse::Err(ml_err) => {
+                        println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", ml_err);
+                    },
+                    MlApiResponse::Response(resp) => {
+                        let msg_text = serde_json::to_string(
+                            &protocol::ServerMessage::Settlements(resp)
+                        ).unwrap();
+                        if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg_text))) {
+                            // Disconnect handled elsewhere
+                            println!("Client disconnected, failed to send");
+                        }
+                    }
+                };
+            } else {
+                // TODO: we should return something to the client indicating an error
+                println!("No client data found for connection!");
+            }
+        }
+
         protocol::ClientMessage::GetSettlementWindows(query_params) => {
             if let Some(client_data) = clients.write().await.get_mut(&client_id) {
                 let get_windows_req =
@@ -365,8 +395,12 @@ async fn client_message(
                     ).map_err(|_| VoodooError::RequestConversionError)?;
                 println!("Get settlement windows request: {:?}", get_windows_req);
                 let result = http_client.execute(get_windows_req).await
-                    .map_err(|e| VoodooError::ParticipantCreation(e.to_string()))?
-                    .json::<MlApiResponse<settlement_windows::SettlementWindows>>().await
+                    .map_err(|e| VoodooError::HttpError("retrieving settlement windows", e.to_string()))?;
+                    // .json::<MlApiResponse<settlement_windows::SettlementWindows>>().await
+                    // .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
+                let result_text = result.text().await.unwrap();
+                println!("Get settlement windows response: {:?}", result_text);
+                let result = serde_json::from_str::<MlApiResponse<settlement_windows::SettlementWindows>>(&result_text)
                     .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
                 match result {
                     MlApiResponse::Err(ml_err) => {
@@ -404,7 +438,7 @@ async fn client_message(
                         ).map_err(|_| VoodooError::InvalidUrl)?
                     ).map_err(|_| VoodooError::RequestConversionError)?;
                 let result = http_client.execute(close_window_req).await
-                    .map_err(|e| VoodooError::SettlementWindowClose(e.to_string()))?
+                    .map_err(|e| VoodooError::HttpError("closing settlement window", e.to_string()))?
                     .json::<MlApiResponse<Empty>>().await
                     .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
                 let msg_text = match result {
@@ -459,7 +493,7 @@ async fn client_message(
                     //     }
                     //   }
                     let result = http_client.execute(create_account_req).await
-                        .map_err(|e| VoodooError::ParticipantCreation(e.to_string()))?
+                        .map_err(|e| VoodooError::HttpError("creating hub account", e.to_string()))?
                         .json::<MlApiResponse<Empty>>().await
                         .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
                     match result {
@@ -526,7 +560,7 @@ async fn client_message(
                             ).map_err(|_| VoodooError::InvalidUrl)?
                         ).map_err(|_| VoodooError::RequestConversionError)?;
                     let new_participant = http_client.execute(new_participant_req).await
-                        .map_err(|e| VoodooError::ParticipantCreation(e.to_string()))?
+                        .map_err(|e| VoodooError::HttpError("creating participant", e.to_string()))?
                         .json::<MlApiResponse<participants::Participant>>().await
                         .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
 
@@ -553,7 +587,7 @@ async fn client_message(
                                     ).map_err(|_| VoodooError::InvalidUrl)?
                                 ).map_err(|_| VoodooError::RequestConversionError)?;
                             http_client.execute(participant_init_req).await
-                                .map_err(|e| VoodooError::ParticipantInit(e.to_string()))?;
+                                .map_err(|e| VoodooError::HttpError("initialising participant account", e.to_string()))?;
 
                             println!("Created participant {} for client", name);
                             // TODO: Need to disable these participants when we're done with them
@@ -605,7 +639,7 @@ async fn client_message(
                         let request = reqwest::Request::try_from(request)
                             .map_err(|_| VoodooError::RequestConversionError)?;
                         http_client.execute(request).await
-                            .map_err(|e| VoodooError::FailedToSetParticipantEndpoint(e.to_string()))?;
+                            .map_err(|e| VoodooError::HttpError("setting participant endpoint", e.to_string()))?;
                         println!("Updated {:?} endpoint to {}.", callback_type, my_address.clone());
                     }
                 }
@@ -626,7 +660,7 @@ async fn client_message(
                 let request = reqwest::Request::try_from(req_post_transfer)
                     .map_err(|_| VoodooError::RequestConversionError)?;
                 http_client.execute(request).await
-                    .map_err(|e| VoodooError::FailedToSetParticipantEndpoint(e.to_string()))?;
+                    .map_err(|e| VoodooError::HttpError("sending transfer prepare", e.to_string()))?;
 
                 println!("Storing in-flight message {}", transfer.transfer_id);
                 in_flight_msgs.write().await.insert(
@@ -672,7 +706,7 @@ async fn client_message(
                 ).map_err(|_| VoodooError::RequestConversionError)?;
 
                 let result = http_client.execute(settlement_model_create_req).await
-                    .map_err(|e| VoodooError::FailedToCreateSettlementModel(e.to_string()))?;
+                    .map_err(|e| VoodooError::HttpError("creating settlement model", e.to_string()))?;
 
                 if result.status() == 201 {
                     if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(success_response_text))) {
