@@ -49,6 +49,7 @@ export type SettlementWindowState =
 
 export interface SettlementWindowContent {
   id: SettlementWindowContentId;
+  settlementWindowId: SettlementWindowId;
   state: SettlementWindowState;
   ledgerAccountType: LedgerAccountType;
   currencyId: Currency;
@@ -114,7 +115,9 @@ export interface GetSettlements {
 export interface Settlement {
   id: SettlementId;
   state: SettlementState;
-  settlementWindows: SettlementWindow[];
+  createdDate: DateTime;
+  changedDate: DateTime;
+  settlementWindows: SettlementSettlementWindow[];
   participants: SettlementParticipant[];
 }
 
