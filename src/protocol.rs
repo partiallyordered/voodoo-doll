@@ -131,6 +131,7 @@ export! {
     settlement_models::LedgerAccountType,
     settlement_models::SettlementModel,
     settlement::GetSettlements,
+    settlement::SettlementSettlementWindow,
     settlement::Settlement,
     settlement::SettlementId,
     settlement::SettlementState,

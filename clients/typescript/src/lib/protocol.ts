@@ -112,6 +112,15 @@ export interface GetSettlements {
   toSettlementWindowDateTime: DateTime | null;
 }
 
+export interface SettlementSettlementWindow {
+  id: SettlementWindowId;
+  reason: string | null;
+  state: SettlementWindowState;
+  createdDate: DateTime;
+  changedDate: DateTime | null;
+  content: SettlementWindowContent[] | null;
+}
+
 export interface Settlement {
   id: SettlementId;
   state: SettlementState;
