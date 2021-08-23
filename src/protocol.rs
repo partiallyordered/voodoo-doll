@@ -1,5 +1,6 @@
 use fspiox_api::*;
 use mojaloop_api::central_ledger::{participants, settlement_models};
+use mojaloop_api::settlement::{settlement, settlement_windows};
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "typescript_types")]
@@ -26,6 +27,13 @@ pub struct AccountInitialization {
 }
 
 #[cfg_attr(feature = "typescript_types", derive(TS))]
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SettlementWindowCloseMessage {
+    pub id: settlement_windows::SettlementWindowId,
+    pub reason: String,
+}
+
+#[cfg_attr(feature = "typescript_types", derive(TS))]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "value")]
 pub enum ClientMessage {
@@ -35,10 +43,21 @@ pub enum ClientMessage {
     CreateHubAccounts(Vec<participants::HubAccount>),
     // TODO: this _could_ be a vector of vectors of accounts. Each 0th-level vector would represent
     // a participant, and each 1st-level vector would contain desired accounts.
+    // TODO: disable the participants on socket closure
     /// Create a set of participants. Will be disabled when the socket disconnects.
     CreateParticipants(Vec<AccountInitialization>),
     /// Create a settlement model
     CreateSettlementModel(settlement_models::SettlementModel),
+    /// Attempt to close the currently open settlement window. Will fail if the window does not
+    /// contain any transfers.
+    CloseSettlementWindow(SettlementWindowCloseMessage),
+    /// Get settlement windows
+    GetSettlementWindows(settlement_windows::GetSettlementWindows),
+    /// Get settlements
+    GetSettlements(settlement::GetSettlements),
+    // /// Generate some closed settlement windows with the given transfers. Will close the currently
+    // /// open settlement window if that contains any existing transfers.
+    // CreateSettlementWindows(Vec<Vec<TransferMessage>>),
 }
 
 #[cfg_attr(feature = "typescript_types", derive(TS))]
@@ -69,6 +88,13 @@ pub struct ClientParticipant {
 
 #[cfg_attr(feature = "typescript_types", derive(TS))]
 #[derive(Debug, Serialize, Deserialize)]
+pub struct SettlementWindowCloseFailedMessage {
+    pub id: settlement_windows::SettlementWindowId,
+    pub response: fspiox_api::common::ErrorResponse,
+}
+
+#[cfg_attr(feature = "typescript_types", derive(TS))]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "value")]
 pub enum ServerMessage {
     TransferComplete(TransferCompleteMessage),
@@ -76,6 +102,10 @@ pub enum ServerMessage {
     AssignParticipants(Vec<ClientParticipant>),
     HubAccountsCreated(Vec<participants::HubAccount>),
     SettlementModelCreated(SettlementModelCreatedMessage),
+    SettlementWindowClosed(settlement_windows::SettlementWindowId),
+    SettlementWindowCloseFailed(SettlementWindowCloseFailedMessage),
+    SettlementWindows(Vec<settlement_windows::SettlementWindow>),
+    Settlements(settlement::Settlements),
 }
 
 #[cfg(feature = "typescript_types")]
@@ -86,14 +116,33 @@ export! {
     ClientParticipant,
     TransferMessage,
     SettlementModelCreatedMessage,
+    SettlementWindowCloseMessage,
+    SettlementWindowCloseFailedMessage,
+    settlement_windows::SettlementWindowState,
+    settlement_windows::SettlementWindowContent,
+    settlement_windows::SettlementWindow,
+    settlement_windows::SettlementWindowId,
+    settlement_windows::SettlementWindowContentId,
+    settlement_windows::GetSettlementWindows,
     settlement_models::SettlementAccountType,
     settlement_models::SettlementDelay,
     settlement_models::SettlementGranularity,
     settlement_models::SettlementInterchange,
     settlement_models::LedgerAccountType,
     settlement_models::SettlementModel,
+    settlement::GetSettlements,
+    settlement::SettlementSettlementWindow,
+    settlement::Settlement,
+    settlement::SettlementId,
+    settlement::SettlementState,
+    settlement::SettlementParticipant,
+    settlement::SettlementAccount,
+    settlement::ParticipantId,
+    settlement::ParticipantCurrencyId,
+    settlement::NetSettlementAmount,
     participants::HubAccount,
     participants::HubAccountType,
+    common::FspId,
     common::DateTime,
     common::Amount,
     common::Currency,

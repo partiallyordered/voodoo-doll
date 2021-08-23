@@ -1,0 +1,13 @@
+apiVersion: skaffold/v2beta12
+kind: Config
+metadata:
+  name: voodoo-doll
+build:
+  artifacts:
+  - image: ghcr.io/partiallyordered/voodoo-doll
+    docker:
+      dockerfile: Dockerfile.dev
+deploy:
+  kustomize:
+    paths:
+    - kubernetes
