@@ -49,7 +49,7 @@ export type SettlementWindowState =
 
 export interface SettlementWindowContent {
   id: SettlementWindowContentId;
-  settlementWindowId: SettlementWindowId;
+  settlementWindowId: SettlementWindowId | null;
   state: SettlementWindowState;
   ledgerAccountType: LedgerAccountType;
   currencyId: Currency;
@@ -112,6 +112,12 @@ export interface GetSettlements {
   toSettlementWindowDateTime: DateTime | null;
 }
 
+export interface NewSettlement {
+  settlementModel: string;
+  reason: string;
+  settlementWindows: WindowParametersNewSettlement[];
+}
+
 export interface SettlementSettlementWindow {
   id: SettlementWindowId;
   reason: string | null;
@@ -160,6 +166,10 @@ export type ParticipantCurrencyId = number;
 export interface NetSettlementAmount {
   amount: Amount;
   currency: Currency;
+}
+
+export interface WindowParametersNewSettlement {
+  id: SettlementWindowId;
 }
 
 export interface HubAccount {
@@ -451,7 +461,8 @@ export type ServerMessage =
     value: SettlementWindowCloseFailedMessage;
   }
   | { type: "SettlementWindows"; value: SettlementWindow[] }
-  | { type: "Settlements"; value: Settlement[] };
+  | { type: "Settlements"; value: Settlement[] }
+  | { type: "NewSettlementCreated"; value: Settlement };
 
 export type ClientMessage =
   | { type: "Transfers"; value: TransferMessage[] }
@@ -460,4 +471,5 @@ export type ClientMessage =
   | { type: "CreateSettlementModel"; value: SettlementModel }
   | { type: "CloseSettlementWindow"; value: SettlementWindowCloseMessage }
   | { type: "GetSettlementWindows"; value: GetSettlementWindows }
-  | { type: "GetSettlements"; value: GetSettlements };
+  | { type: "GetSettlements"; value: GetSettlements }
+  | { type: "CreateSettlement"; value: NewSettlement };

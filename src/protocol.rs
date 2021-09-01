@@ -55,6 +55,8 @@ pub enum ClientMessage {
     GetSettlementWindows(settlement_windows::GetSettlementWindows),
     /// Get settlements
     GetSettlements(settlement::GetSettlements),
+    /// Create settlement from settlement windows
+    CreateSettlement(settlement::NewSettlement),
     // /// Generate some closed settlement windows with the given transfers. Will close the currently
     // /// open settlement window if that contains any existing transfers.
     // CreateSettlementWindows(Vec<Vec<TransferMessage>>),
@@ -106,6 +108,7 @@ pub enum ServerMessage {
     SettlementWindowCloseFailed(SettlementWindowCloseFailedMessage),
     SettlementWindows(Vec<settlement_windows::SettlementWindow>),
     Settlements(settlement::Settlements),
+    NewSettlementCreated(settlement::Settlement),
 }
 
 #[cfg(feature = "typescript_types")]
@@ -131,6 +134,7 @@ export! {
     settlement_models::LedgerAccountType,
     settlement_models::SettlementModel,
     settlement::GetSettlements,
+    settlement::NewSettlement,
     settlement::SettlementSettlementWindow,
     settlement::Settlement,
     settlement::SettlementId,
@@ -140,6 +144,7 @@ export! {
     settlement::ParticipantId,
     settlement::ParticipantCurrencyId,
     settlement::NetSettlementAmount,
+    settlement::WindowParametersNewSettlement,
     participants::HubAccount,
     participants::HubAccountType,
     common::FspId,
