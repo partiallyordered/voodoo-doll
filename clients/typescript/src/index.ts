@@ -65,7 +65,7 @@ export class VoodooClient extends WebSocket {
     ): PromiseLike<ServerResponse> {
         return new Promise((resolve, reject) => {
             const exchangeType = `${sendMsg.type}-${recvMsgDiscriminator}`;
-            trace(`Beginning ${exchangeType} exchange`);
+            trace(`Beginning ${exchangeType} exchange. Timeout after ${timeoutMs}ms.`);
             const t = setTimeout(
                 () => reject(new Error(`${exchangeType} exchange timed out after ${timeoutMs}ms`)),
                 timeoutMs
