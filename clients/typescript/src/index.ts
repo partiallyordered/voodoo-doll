@@ -6,13 +6,21 @@ const trace = (...args: any[]) => {}; // console.log(...args);
 
 const DEFAULT_TIMEOUT: number = 5000;
 
+export interface VoodooClientOptions extends WebSocket.ClientOptions {
+    defaultTimeout?: number,
+}
+
 // A websocket with
 // - typed 'message' event
 // - typed send
 // - convenience methods for client-server request-response patterns
 export class VoodooClient extends WebSocket {
-    constructor(address: string | url.URL, options?: WebSocket.ClientOptions) {
+    defaultTimeout: number;
+
+    constructor(address: string | url.URL, options?: VoodooClientOptions) {
         super(address, options);
+
+        this.defaultTimeout = options?.defaultTimeout || DEFAULT_TIMEOUT;
 
         super.on('message', function handle(message) {
             trace(`Received message: ${message}`);
@@ -53,11 +61,11 @@ export class VoodooClient extends WebSocket {
     exchange<ServerResponse extends protocol.ServerMessage['value']>(
         sendMsg: protocol.ClientMessage,
         recvMsgDiscriminator: protocol.ServerMessage['type'],
-        timeoutMs: number = DEFAULT_TIMEOUT,
+        timeoutMs: number = this.defaultTimeout,
     ): PromiseLike<ServerResponse> {
         return new Promise((resolve, reject) => {
             const exchangeType = `${sendMsg.type}-${recvMsgDiscriminator}`;
-            trace(`Beginning ${exchangeType} exchange`);
+            trace(`Beginning ${exchangeType} exchange. Timeout after ${timeoutMs}ms.`);
             const t = setTimeout(
                 () => reject(new Error(`${exchangeType} exchange timed out after ${timeoutMs}ms`)),
                 timeoutMs
@@ -88,7 +96,7 @@ export class VoodooClient extends WebSocket {
 
     createParticipants(
         participants: protocol.AccountInitialization[],
-        timeoutMs: number = DEFAULT_TIMEOUT,
+        timeoutMs: number = this.defaultTimeout,
     ) {
         return this.exchange<protocol.ClientParticipant[]>(
             {
@@ -102,7 +110,7 @@ export class VoodooClient extends WebSocket {
 
     createHubAccounts(
         accounts: protocol.HubAccount[],
-        timeoutMs: number = DEFAULT_TIMEOUT,
+        timeoutMs: number = this.defaultTimeout,
     ) {
         return this.exchange<protocol.HubAccount[]>(
             {
@@ -116,7 +124,7 @@ export class VoodooClient extends WebSocket {
 
     completeTransfers(
         transfers: protocol.TransferMessage[],
-        timeoutMs: number = DEFAULT_TIMEOUT,
+        timeoutMs: number = this.defaultTimeout,
     ) {
         return this.exchange<protocol.TransferCompleteMessage>(
             {
@@ -130,7 +138,7 @@ export class VoodooClient extends WebSocket {
 
     createSettlementModel(
         model: protocol.SettlementModel,
-        timeoutMs: number = DEFAULT_TIMEOUT,
+        timeoutMs: number = this.defaultTimeout,
     ) {
         return this.exchange<protocol.SettlementModelCreatedMessage>(
             {
@@ -144,7 +152,7 @@ export class VoodooClient extends WebSocket {
 
     getSettlementWindows(
         params: protocol.GetSettlementWindows,
-        timeoutMs: number = DEFAULT_TIMEOUT,
+        timeoutMs: number = this.defaultTimeout,
     ) {
         return this.exchange<protocol.SettlementWindow[]>(
             {
@@ -158,7 +166,7 @@ export class VoodooClient extends WebSocket {
 
     closeSettlementWindow(
         payload: protocol.SettlementWindowCloseMessage,
-        timeoutMs: number = DEFAULT_TIMEOUT,
+        timeoutMs: number = this.defaultTimeout,
     ) {
         return this.exchange<protocol.SettlementWindowId>(
             {
@@ -172,7 +180,7 @@ export class VoodooClient extends WebSocket {
 
     getSettlements(
         payload: protocol.GetSettlements,
-        timeoutMs: number = DEFAULT_TIMEOUT,
+        timeoutMs: number = this.defaultTimeout,
     ) {
         return this.exchange<protocol.Settlement[]>(
             {
@@ -186,7 +194,7 @@ export class VoodooClient extends WebSocket {
 
     createSettlement(
         payload: protocol.NewSettlement,
-        timeoutMs: number = DEFAULT_TIMEOUT,
+        timeoutMs: number = this.defaultTimeout,
     ) {
         return this.exchange<protocol.Settlement>(
             {
