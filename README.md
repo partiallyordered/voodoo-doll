@@ -2,6 +2,11 @@
 An in-cluster Mojaloop participant simulator intended for temporary deployment by mojo
 
 ### TODO
+- Document client features, and required features
+- Extend clients to support
+  - convenient deployment/detection of voodoo-doll
+  - convenient port-forwarding mechanisms, preferably including to a stream abstraction available
+      within the language
 - A release process that
   - Puts the GH revision in the built artifacts
   - Sets all the built artifact versions equal

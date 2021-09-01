@@ -157,10 +157,8 @@ async fn main() {
         // TODO: does this create a new client per-request? I guess so? Avoid this..
         .and(warp::any().map(|| reqwest::Client::new()))
         .and_then({
-            let clients = clients.clone();
-            let in_flight_msgs = in_flight_msgs.clone();
             move |transfer_prepare: transfer::TransferPrepareRequestBody, http_client|
-                handle_post_transfers(transfer_prepare, http_client, in_flight_msgs.clone(), clients.clone())
+                handle_post_transfers(transfer_prepare, http_client)
         });
 
     // PUT /transfers/{id}/error
@@ -253,8 +251,6 @@ async fn handle_put_transfers_error(
 async fn handle_post_transfers(
     transfer_prepare: transfer::TransferPrepareRequestBody,
     http_client: reqwest::Client,
-    in_flight_msgs: InFlightFspiopMessages,
-    clients: Clients,
 ) -> std::result::Result<impl warp::Reply, std::convert::Infallible> {
     use std::convert::TryFrom;
     println!("Received POST /transfer {:?}", transfer_prepare);
@@ -322,9 +318,11 @@ async fn client_message(
 ) -> Result<()> {
     // TODO: consider replying with non-string messages with "go away"
     let msg = msg.to_str().map_err(|_| VoodooError::NonStringWebsocketMessageReceived)?;
-    println!("Message from client: {}", msg);
+    println!("Raw message from client: {}", msg);
+
     let msg_de: protocol::ClientMessage = serde_json::from_str(msg)
         .map_err(|e| VoodooError::WebsocketMessageDeserializeFailed(e.to_string(), msg.to_string()))?;
+    println!("Deserialized message from client: {:?}", msg_de);
 
     use mojaloop_api::common::to_request;
     use mojaloop_api::central_ledger::participants;
@@ -338,16 +336,52 @@ async fn client_message(
     let my_ip = std::env::var("HOST_IP").map_err(|_| VoodooError::HostIpNotFound)?;
     let my_address = format!("http://{}:{}", my_ip, 3030);
 
-    #[derive(serde::Deserialize)]
+    #[derive(serde::Deserialize, Debug)]
     #[serde(untagged)]
     enum MlApiResponse<T> {
         Err(fspiox_api::common::ErrorResponse),
         Response(T),
     }
-    #[derive(serde::Deserialize)]
+    #[derive(serde::Deserialize, Debug)]
     struct Empty {}
 
     match msg_de {
+        protocol::ClientMessage::CreateSettlement(new_settlement) => {
+            if let Some(client_data) = clients.write().await.get_mut(&client_id) {
+                let create_settlement_req =
+                    reqwest::Request::try_from(
+                        to_request(
+                            settlement::PostSettlement { new_settlement },
+                            "http://centralsettlement-service",
+                        ).map_err(|_| VoodooError::InvalidUrl)?
+                    ).map_err(|_| VoodooError::RequestConversionError)?;
+                println!("Create settlement request: {:?}", create_settlement_req);
+                let result = http_client.execute(create_settlement_req).await
+                    .map_err(|e| VoodooError::HttpError("retrieving settlements", e.to_string()))?;
+                let result_text = result.text().await.unwrap();
+                println!("Create settlement response: {:?}", result_text);
+                let result = serde_json::from_str::<MlApiResponse<settlement::Settlement>>(&result_text)
+                    .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
+                match result {
+                    MlApiResponse::Err(ml_err) => {
+                        println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", ml_err);
+                    },
+                    MlApiResponse::Response(resp) => {
+                        let msg_text = serde_json::to_string(
+                            &protocol::ServerMessage::NewSettlementCreated(resp)
+                        ).unwrap();
+                        if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg_text))) {
+                            // Disconnect handled elsewhere
+                            println!("Client disconnected, failed to send");
+                        }
+                    }
+                };
+            } else {
+                // TODO: we should return something to the client indicating an error
+                println!("No client data found for connection!");
+            }
+        }
+
         protocol::ClientMessage::GetSettlements(query_params) => {
             if let Some(client_data) = clients.write().await.get_mut(&client_id) {
                 let get_settlements_req =
@@ -437,10 +471,12 @@ async fn client_message(
                             "http://centralsettlement-service",
                         ).map_err(|_| VoodooError::InvalidUrl)?
                     ).map_err(|_| VoodooError::RequestConversionError)?;
+                println!("Closing settlement window {}", close_msg.id);
                 let result = http_client.execute(close_window_req).await
                     .map_err(|e| VoodooError::HttpError("closing settlement window", e.to_string()))?
                     .json::<MlApiResponse<Empty>>().await
                     .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
+                println!("Close settlement window result {:?}", result);
                 let msg_text = match result {
                     MlApiResponse::Err(ml_err) => {
                         serde_json::to_string(
@@ -458,6 +494,7 @@ async fn client_message(
                         ).unwrap()
                     }
                 };
+                println!("Sending message to client: {}", msg_text);
                 if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg_text))) {
                     // Disconnect handled elsewhere
                     println!("Client disconnected, failed to send");

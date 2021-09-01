@@ -3,6 +3,7 @@ FROM rust:1.53 as builder
 RUN USER=root cargo new --bin voodoo-doll
 WORKDIR ./voodoo-doll
 COPY ./Cargo.toml ./Cargo.toml
+RUN cargo vendor
 RUN touch src/lib.rs
 RUN cargo build --bin voodoo-doll
 RUN rm src/*.rs

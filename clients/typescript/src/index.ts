@@ -28,6 +28,7 @@ export class VoodooClient extends WebSocket {
                 case 'SettlementWindowCloseFailed':
                 case 'SettlementWindows':
                 case 'Settlements':
+                case 'NewSettlementCreated':
                     this.emit(m.type, m.value);
                     break;
                 default: {
@@ -179,6 +180,20 @@ export class VoodooClient extends WebSocket {
                 value: payload,
             },
             "Settlements",
+            timeoutMs,
+        );
+    }
+
+    createSettlement(
+        payload: protocol.NewSettlement,
+        timeoutMs: number = DEFAULT_TIMEOUT,
+    ) {
+        return this.exchange<protocol.Settlement>(
+            {
+                type: "CreateSettlement",
+                value: payload,
+            },
+            "NewSettlementCreated",
             timeoutMs,
         );
     }
