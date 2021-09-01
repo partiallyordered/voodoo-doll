@@ -58,7 +58,7 @@ export class VoodooClient extends WebSocket {
             const exchangeType = `${sendMsg.type}-${recvMsgDiscriminator}`;
             trace(`Beginning ${exchangeType} exchange`);
             const t = setTimeout(
-                () => reject(`${exchangeType} exchange timed out after ${timeoutMs}ms`),
+                () => reject(new Error(`${exchangeType} exchange timed out after ${timeoutMs}ms`)),
                 timeoutMs
             );
 
