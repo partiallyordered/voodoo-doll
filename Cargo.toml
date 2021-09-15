@@ -1,6 +1,6 @@
 [package]
 name = "voodoo-doll"
-version = "0.7.0"
+version = "0.8.0"
 authors = ["msk- <mattkingston@gmail.com>"]
 edition = "2018"
 
@@ -20,7 +20,7 @@ fspiox-api = { git = "https://github.com/partiallyordered/fspiox-api", rev = "fe
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
-mojaloop-api = { git = "https://github.com/partiallyordered/mojaloop-api", rev = "00c2a0b496bfcc1ff7996082ff74159b122bd745", features = ["typescript_types"] }
+mojaloop-api = { git = "https://github.com/partiallyordered/mojaloop-api", rev = "d25034a6ac8be1faab78504e57f4220b9dc40a12", features = ["typescript_types"] }
 # mojaloop-api = { path = "/home/msk/projects/github.com/msk-/mojaloop-api/", features = ["typescript_types"] }
 gethostname = "0.2"
 thiserror = "1.0"
