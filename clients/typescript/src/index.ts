@@ -2,7 +2,7 @@ import * as protocol from './lib/protocol';
 import WebSocket from 'ws';
 import * as url from 'url';
 
-const trace = (...args: any[]) => {}; // console.log(...args);
+const trace = (..._args: any[]) => ({}); // console.log(..._args);
 
 const DEFAULT_TIMEOUT: number = 5000;
 

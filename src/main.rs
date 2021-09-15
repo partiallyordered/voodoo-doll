@@ -9,6 +9,7 @@ use std::sync::{
 };
 
 use futures::{FutureExt, StreamExt};
+use tokio::time::{sleep, Duration};
 use tokio::sync::{mpsc, RwLock};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use warp::ws::{Message, WebSocket};
@@ -202,6 +203,7 @@ async fn handle_put_transfers(
                         id: transfer_id,
                     }
                 )).unwrap();
+                println!("Sending message to client: {}", msg_text);
                 if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg_text))) {
                     // Disconnect handled elsewhere
                     println!("Client disconnected, failed to send");
@@ -477,27 +479,86 @@ async fn client_message(
                     .json::<MlApiResponse<Empty>>().await
                     .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
                 println!("Close settlement window result {:?}", result);
-                let msg_text = match result {
+                let close_result = match result {
                     MlApiResponse::Err(ml_err) => {
-                        serde_json::to_string(
-                            &protocol::ServerMessage::SettlementWindowCloseFailed(
-                                protocol::SettlementWindowCloseFailedMessage {
-                                    id: close_msg.id,
-                                    response: ml_err,
-                                }
-                            )
-                        ).unwrap()
+                        Ok(
+                            serde_json::to_string(
+                                &protocol::ServerMessage::SettlementWindowCloseFailed(
+                                    protocol::SettlementWindowCloseFailedMessage {
+                                        id: close_msg.id,
+                                        response: ml_err,
+                                    }
+                                )
+                            ).unwrap()
+                        )
                     },
                     MlApiResponse::Response(_) => {
-                        serde_json::to_string(
-                            &protocol::ServerMessage::SettlementWindowClosed(close_msg.id)
-                        ).unwrap()
+                        // Settlement window closure happens asynchronously for no reason that I
+                        // can discern. So we need to poll central settlement for the window state
+                        // until it's closed.
+                        // TODO: ask _why_ window closure happens asynchronously
+                        println!("Begin polling for settlement window {} closure", close_msg.id);
+                        let mut n = 1;
+                        loop {
+                            let window_req =
+                                reqwest::Request::try_from(
+                                    to_request(
+                                        settlement_windows::GetSettlementWindow {
+                                            id: close_msg.id,
+                                        },
+                                        "http://centralsettlement-service",
+                                    ).map_err(|_| VoodooError::InvalidUrl)?
+                                ).map_err(|_| VoodooError::RequestConversionError)?;
+                            let get_window_result = http_client.execute(window_req).await
+                                .map_err(|e| VoodooError::HttpError("requesting settlement window", e.to_string()))?
+                                .text().await.unwrap();
+                            println!("Get window result: {:?}", get_window_result);
+                            let get_window_result = serde_json::from_str::<MlApiResponse<settlement_windows::SettlementWindow>>(get_window_result.as_str())
+                                .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
+                            println!("Polling attempt #{} to retrieve settlement window {} state. State: {:?}", n, close_msg.id, get_window_result);
+                            match get_window_result {
+                                MlApiResponse::Err(ml_err) => {
+                                    break Err(format!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", ml_err));
+                                },
+                                MlApiResponse::Response(window) => {
+                                    if window.state == settlement_windows::SettlementWindowState::Closed {
+                                        println!(
+                                            "Finished polling for settlement window {} closure. Window closed.",
+                                            close_msg.id,
+                                        );
+                                        break Ok(
+                                            serde_json::to_string(
+                                                &protocol::ServerMessage::SettlementWindowClosed(close_msg.id)
+                                            ).unwrap()
+                                        );
+                                    }
+                                }
+                            }
+                            if n == 10 {
+                                break Err(
+                                    format!(
+                                        "Polling for settlement window {} closure failed after {} attempts",
+                                        close_msg.id,
+                                        n,
+                                    )
+                                );
+                            }
+                            sleep(Duration::from_secs(1)).await;
+                            n = n + 1;
+                        }
                     }
                 };
-                println!("Sending message to client: {}", msg_text);
-                if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg_text))) {
-                    // Disconnect handled elsewhere
-                    println!("Client disconnected, failed to send");
+                match close_result {
+                    Ok(msg) => {
+                        println!("Sending message to client: {}", msg);
+                        if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg))) {
+                            // Disconnect handled elsewhere
+                            println!("Client disconnected, failed to send");
+                        }
+                    }
+                    Err(msg) => {
+                        println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", msg);
+                    }
                 }
             } else {
                 // TODO: we should return something to the client indicating an error
