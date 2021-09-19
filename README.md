@@ -2,6 +2,7 @@
 An in-cluster Mojaloop participant simulator intended for temporary deployment by mojo
 
 ### TODO
+- Change pod to deployment, easier to change version, especially with Skaffold
 - Document client features, and required features
 - Extend clients to support
   - convenient deployment/detection of voodoo-doll

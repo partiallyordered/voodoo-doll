@@ -2,15 +2,11 @@
 // https://kubernetes.io/docs/concepts/containers/container-environment/
 // It's possible to use hostname -i, so probably possible from code
 
-use std::collections::HashMap;
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
-};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use futures::{FutureExt, StreamExt};
 use tokio::time::{sleep, Duration};
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use warp::ws::{Message, WebSocket};
 use warp::Filter;
@@ -18,8 +14,11 @@ use thiserror::Error;
 use regex::Regex;
 use lazy_static::lazy_static;
 
-use fspiox_api::*;
+use fspiox_api::{common, transfer, to_http_request, build_transfer_prepare};
 mod protocol;
+mod control_plane;
+mod fspiop_handlers;
+use crate::fspiop_handlers::*;
 
 #[derive(Error, Debug)]
 enum VoodooError {
@@ -41,35 +40,10 @@ enum VoodooError {
     HttpError(&'static str, String),
 }
 
-type Result<T> = std::result::Result<T, VoodooError>;
-
 static CLIENT_ID_COUNTER: AtomicUsize = AtomicUsize::new(1);
 
-struct ClientData {
-    chan: mpsc::UnboundedSender<std::result::Result<Message, warp::Error>>,
-    participants: Vec<common::FspId>,
-}
-
-type ClientId = usize;
-type Clients = Arc<RwLock<HashMap<ClientId, ClientData>>>;
-
-#[derive(Hash, PartialEq, Eq, Debug)]
-enum FspiopMessageId {
-    TransferId(transfer::TransferId),
-}
-
-/// FSPIOP messages that we've sent that we're expecting a callback for, mapped to the client that
-/// requested them.
-type InFlightFspiopMessages = Arc<RwLock<HashMap<FspiopMessageId, ClientId>>>;
-
-// TODO: implement this properly to return an actual FSPIOP error. Or perhaps add warp-specific
-// return value implementations to the fspiox-api FspiopError.
-#[derive(Error, Debug)]
-enum FspiopError {
-    #[error("Request body couldn't be deserialized: {0}")]
-    MalformedRequestBody(String),
-}
-impl warp::reject::Reject for FspiopError {}
+type Result<T> = std::result::Result<T, VoodooError>;
+impl warp::reject::Reject for control_plane::FspiopError {}
 
 // We implement a json body handler here because warp::body::json() also enforces the content-type
 // header to equal application/json. This doesn't work for us.
@@ -77,7 +51,7 @@ fn json_body<T: serde::de::DeserializeOwned + Send>() -> impl warp::Filter<Extra
     warp::body::bytes().and_then(|buf: hyper::body::Bytes| async move {
         serde_json::from_slice::<T>(&buf)
             // .map_err(|e| warp::reject::known(warp::filters::body::BodyDeserializeError { cause: e }))
-            .map_err(|e| warp::reject::custom(FspiopError::MalformedRequestBody(e.to_string())))
+            .map_err(|e| warp::reject::custom(control_plane::FspiopError::MalformedRequestBody(e.to_string())))
     })
 }
 
@@ -89,9 +63,9 @@ async fn handle_rejection(err: warp::reject::Rejection) -> std::result::Result<i
     if err.is_not_found() {
         code = StatusCode::NOT_FOUND;
         message = "NOT_FOUND";
-    } else if let Some(e) = err.find::<FspiopError>() {
+    } else if let Some(e) = err.find::<control_plane::FspiopError>() {
         match e {
-            FspiopError::MalformedRequestBody(s) => {
+            control_plane::FspiopError::MalformedRequestBody(s) => {
                 code = StatusCode::BAD_REQUEST;
                 message = s;
             }
@@ -123,8 +97,8 @@ async fn handle_rejection(err: warp::reject::Rejection) -> std::result::Result<i
 
 #[tokio::main]
 async fn main() {
-    let clients = Clients::default();
-    let in_flight_msgs = InFlightFspiopMessages::default();
+    let clients = control_plane::Clients::default();
+    let in_flight_msgs = control_plane::InFlightFspiopMessages::default();
 
     // GET /voodoo -> websocket upgrade
     let voodoo = warp::path("voodoo")
@@ -172,7 +146,7 @@ async fn main() {
         .and_then({
             let clients = clients.clone();
             let in_flight_msgs = in_flight_msgs.clone();
-            move |transfer_id: transfer::TransferId, transfer_error: fspiox_api::common::ErrorResponse|
+            move |transfer_id: transfer::TransferId, transfer_error: common::ErrorResponse|
                 handle_put_transfers_error(transfer_id, transfer_error, in_flight_msgs.clone(), clients.clone())
         });
 
@@ -187,92 +161,7 @@ async fn main() {
     warp::serve(routes).run(([0, 0, 0, 0], 3030)).await;
 }
 
-async fn handle_put_transfers(
-    transfer_id: transfer::TransferId,
-    transfer_fulfil: transfer::TransferFulfilRequestBody,
-    in_flight_msgs: InFlightFspiopMessages,
-    clients: Clients,
-) -> std::result::Result<impl warp::Reply, std::convert::Infallible> {
-    match in_flight_msgs.read().await.get(&FspiopMessageId::TransferId(transfer_id)) {
-        // TODO: assert that the transfer ID in the URI matches the transfer ID in the payload?
-        Some(client_id) => {
-            println!("Transfer fulfil received | {:?}", transfer_fulfil);
-            if let Some(client_data) = clients.write().await.get_mut(client_id) {
-                let msg_text = serde_json::to_string(&protocol::ServerMessage::TransferComplete(
-                    protocol::TransferCompleteMessage {
-                        id: transfer_id,
-                    }
-                )).unwrap();
-                println!("Sending message to client: {}", msg_text);
-                if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg_text))) {
-                    // Disconnect handled elsewhere
-                    println!("Client disconnected, failed to send");
-                }
-            } else {
-                println!("No client found for transfer");
-            }
-        }
-        None => println!("Received unrecognised FSPIOP transfer prepare message")
-    }
-    Ok("")
-}
-
-async fn handle_put_transfers_error(
-    transfer_id: transfer::TransferId,
-    transfer_error: fspiox_api::common::ErrorResponse,
-    in_flight_msgs: InFlightFspiopMessages,
-    clients: Clients,
-) -> std::result::Result<impl warp::Reply, std::convert::Infallible> {
-    match in_flight_msgs.read().await.get(&FspiopMessageId::TransferId(transfer_id)) {
-        // TODO: assert that the transfer ID in the URI matches the transfer ID in the payload?
-        Some(client_id) => {
-            println!("Transfer error received {} | {:?}", transfer_id, transfer_error);
-            if let Some(client_data) = clients.write().await.get_mut(client_id) {
-                let msg_text = serde_json::to_string(&protocol::ServerMessage::TransferError(
-                    protocol::TransferErrorMessage {
-                        id: transfer_id,
-                        response: transfer_error,
-                    }
-                )).unwrap();
-                if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg_text))) {
-                    // Disconnect handled elsewhere
-                    println!("Client disconnected, failed to send");
-                }
-            } else {
-                println!("No client found for transfer");
-            }
-        }
-        None => println!(
-            "Received unrecognised FSPIOP transfer error message. ID: {:?}",
-            transfer_id,
-        )
-    }
-    Ok("")
-}
-
-async fn handle_post_transfers(
-    transfer_prepare: transfer::TransferPrepareRequestBody,
-    http_client: reqwest::Client,
-) -> std::result::Result<impl warp::Reply, std::convert::Infallible> {
-    use std::convert::TryFrom;
-    println!("Received POST /transfer {:?}", transfer_prepare);
-    let req_put_transfer = to_http_request(
-        build_transfer_fulfil(
-            transfer_prepare.payer_fsp,
-            transfer_prepare.payee_fsp,
-            transfer_prepare.transfer_id,
-        ),
-        // TODO: more robust mechanism for finding the "ml api adapter service" service
-        "http://ml-api-adapter-service",
-    ).unwrap();
-    println!("Sending PUT /transfer {:?}", req_put_transfer);
-    let request = reqwest::Request::try_from(req_put_transfer).unwrap();
-    http_client.execute(request).await.unwrap();
-    println!("Sent PUT /transfer with ID {}", transfer_prepare.transfer_id);
-    Ok("")
-}
-
-async fn ws_connection_handler(ws: WebSocket, clients: Clients, in_flight_msgs: InFlightFspiopMessages) {
+async fn ws_connection_handler(ws: WebSocket, clients: control_plane::Clients, in_flight_msgs: control_plane::InFlightFspiopMessages) {
     let client_id = CLIENT_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
 
     println!("voodoo client connected: {}", client_id);
@@ -287,7 +176,7 @@ async fn ws_connection_handler(ws: WebSocket, clients: Clients, in_flight_msgs: 
         }
     }));
 
-    clients.write().await.insert(client_id, ClientData { chan: tx, participants: Vec::new() });
+    clients.write().await.insert(client_id, control_plane::ClientData { chan: tx, participants: Vec::new() });
 
     let http_client = reqwest::Client::new();
 
@@ -315,8 +204,8 @@ async fn client_message(
     client_id: usize,
     http_client: &reqwest::Client,
     msg: Message,
-    in_flight_msgs: &InFlightFspiopMessages,
-    clients: &Clients,
+    in_flight_msgs: &control_plane::InFlightFspiopMessages,
+    clients: &control_plane::Clients,
 ) -> Result<()> {
     // TODO: consider replying with non-string messages with "go away"
     let msg = msg.to_str().map_err(|_| VoodooError::NonStringWebsocketMessageReceived)?;
@@ -369,13 +258,7 @@ async fn client_message(
                         println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", ml_err);
                     },
                     MlApiResponse::Response(resp) => {
-                        let msg_text = serde_json::to_string(
-                            &protocol::ServerMessage::NewSettlementCreated(resp)
-                        ).unwrap();
-                        if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg_text))) {
-                            // Disconnect handled elsewhere
-                            println!("Client disconnected, failed to send");
-                        }
+                        client_data.send(&protocol::ServerMessage::NewSettlementCreated(resp));
                     }
                 };
             } else {
@@ -405,13 +288,7 @@ async fn client_message(
                         println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", ml_err);
                     },
                     MlApiResponse::Response(resp) => {
-                        let msg_text = serde_json::to_string(
-                            &protocol::ServerMessage::Settlements(resp)
-                        ).unwrap();
-                        if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg_text))) {
-                            // Disconnect handled elsewhere
-                            println!("Client disconnected, failed to send");
-                        }
+                        client_data.send(&protocol::ServerMessage::Settlements(resp));
                     }
                 };
             } else {
@@ -443,13 +320,7 @@ async fn client_message(
                         println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", ml_err);
                     },
                     MlApiResponse::Response(resp) => {
-                        let msg_text = serde_json::to_string(
-                            &protocol::ServerMessage::SettlementWindows(resp)
-                        ).unwrap();
-                        if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg_text))) {
-                            // Disconnect handled elsewhere
-                            println!("Client disconnected, failed to send");
-                        }
+                        client_data.send(&protocol::ServerMessage::SettlementWindows(resp));
                     }
                 };
             } else {
@@ -482,14 +353,12 @@ async fn client_message(
                 let close_result = match result {
                     MlApiResponse::Err(ml_err) => {
                         Ok(
-                            serde_json::to_string(
-                                &protocol::ServerMessage::SettlementWindowCloseFailed(
-                                    protocol::SettlementWindowCloseFailedMessage {
-                                        id: close_msg.id,
-                                        response: ml_err,
-                                    }
-                                )
-                            ).unwrap()
+                            protocol::ServerMessage::SettlementWindowCloseFailed(
+                                protocol::SettlementWindowCloseFailedMessage {
+                                    id: close_msg.id,
+                                    response: ml_err,
+                                }
+                            )
                         )
                     },
                     MlApiResponse::Response(_) => {
@@ -527,9 +396,7 @@ async fn client_message(
                                             close_msg.id,
                                         );
                                         break Ok(
-                                            serde_json::to_string(
-                                                &protocol::ServerMessage::SettlementWindowClosed(close_msg.id)
-                                            ).unwrap()
+                                            protocol::ServerMessage::SettlementWindowClosed(close_msg.id)
                                         );
                                     }
                                 }
@@ -550,11 +417,8 @@ async fn client_message(
                 };
                 match close_result {
                     Ok(msg) => {
-                        println!("Sending message to client: {}", msg);
-                        if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg))) {
-                            // Disconnect handled elsewhere
-                            println!("Client disconnected, failed to send");
-                        }
+                        println!("Sending message to client: {:?}", msg);
+                        client_data.send(&msg);
                     }
                     Err(msg) => {
                         println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", msg);
@@ -601,13 +465,7 @@ async fn client_message(
                         MlApiResponse::Response(_) => {}
                     }
                 }
-                let msg_text = serde_json::to_string(
-                    &protocol::ServerMessage::HubAccountsCreated(accounts)
-                ).unwrap();
-                if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg_text))) {
-                    // Disconnect handled elsewhere
-                    println!("Client disconnected, failed to send");
-                }
+                client_data.send(&protocol::ServerMessage::HubAccountsCreated(accounts));
             } else {
                 // TODO: we should return something to the client indicating an error
                 println!("No client data found for connection!");
@@ -698,13 +556,7 @@ async fn client_message(
                     }
                 }
 
-                let msg_text = serde_json::to_string(
-                    &protocol::ServerMessage::AssignParticipants(new_participants)
-                ).unwrap();
-                if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg_text))) {
-                    // Disconnect handled elsewhere
-                    println!("Client disconnected, failed to send");
-                }
+                client_data.send(&protocol::ServerMessage::AssignParticipants(new_participants));
             } else {
                 // TODO: we should return something to the client indicating an error
                 println!("No client data found for connection!");
@@ -762,7 +614,7 @@ async fn client_message(
 
                 println!("Storing in-flight message {}", transfer.transfer_id);
                 in_flight_msgs.write().await.insert(
-                    FspiopMessageId::TransferId(transfer.transfer_id),
+                    control_plane::FspiopMessageId::TransferId(transfer.transfer_id),
                     client_id
                 );
 
@@ -787,12 +639,12 @@ async fn client_message(
             if let Some(client_data) = clients.write().await.get_mut(&client_id) {
                 use mojaloop_api::central_ledger::settlement_models;
 
-                let success_response_text = serde_json::to_string(
-                    &protocol::ServerMessage::SettlementModelCreated(
+                let success_response =
+                    protocol::ServerMessage::SettlementModelCreated(
                         protocol::SettlementModelCreatedMessage {
                             settlement_model: settlement_model.clone()
                         }
-                    )).unwrap();
+                    );
 
                 let settlement_model_create_req = reqwest::Request::try_from(
                     to_request(
@@ -807,10 +659,7 @@ async fn client_message(
                     .map_err(|e| VoodooError::HttpError("creating settlement model", e.to_string()))?;
 
                 if result.status() == 201 {
-                    if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(success_response_text))) {
-                        // Disconnect handled elsewhere
-                        println!("Client disconnected, failed to send");
-                    }
+                    client_data.send(&success_response);
                 } else {
                     let result = result
                         .json::<fspiox_api::common::ErrorResponse>().await
@@ -826,10 +675,7 @@ async fn client_message(
                         // existed". At the time of writing, ignoring this case is
                         // desirable, however this is certainly not the general case, and
                         // this should be handled, and an error returned to the client.
-                        if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(success_response_text))) {
-                            // Disconnect handled elsewhere
-                            println!("Client disconnected, failed to send");
-                        }
+                        client_data.send(&success_response);
                     } else {
                         println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", result);
                     }
