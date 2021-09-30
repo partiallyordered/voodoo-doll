@@ -2,13 +2,13 @@ use std::collections::HashMap;
 use warp::ws::Message;
 use tokio::sync::{mpsc, RwLock};
 use std::sync::Arc;
-use fspiox_api::{common, transfer};
+use fspiox_api::{FspId, transfer};
 use thiserror::Error;
 use crate::protocol;
 
 pub(crate) struct ClientData {
     pub chan: mpsc::UnboundedSender<std::result::Result<Message, warp::Error>>,
-    pub participants: Vec<common::FspId>,
+    pub participants: Vec<FspId>,
 }
 
 impl ClientData {

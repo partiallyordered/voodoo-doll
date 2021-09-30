@@ -1,6 +1,8 @@
 use crate::control_plane;
-use fspiox_api::{transfer, to_http_request, build_transfer_fulfil};
+use fspiox_api::transfer;
 use crate::protocol;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 pub(crate) async fn handle_put_transfers(
     transfer_id: transfer::TransferId,
@@ -30,7 +32,7 @@ pub(crate) async fn handle_put_transfers(
 
 pub(crate) async fn handle_put_transfers_error(
     transfer_id: transfer::TransferId,
-    transfer_error: fspiox_api::common::ErrorResponse,
+    transfer_error: fspiox_api::ErrorResponse,
     in_flight_msgs: control_plane::InFlightFspiopMessages,
     clients: control_plane::Clients,
 ) -> std::result::Result<impl warp::Reply, std::convert::Infallible> {
@@ -60,22 +62,22 @@ pub(crate) async fn handle_put_transfers_error(
 
 pub(crate) async fn handle_post_transfers(
     transfer_prepare: transfer::TransferPrepareRequestBody,
-    http_client: reqwest::Client,
+    transfer_client: Arc<Mutex<mojaloop_api::clients::transfer::Client>>,
 ) -> std::result::Result<impl warp::Reply, std::convert::Infallible> {
-    use std::convert::TryFrom;
     println!("Received POST /transfer {:?}", transfer_prepare);
-    let req_put_transfer = to_http_request(
-        build_transfer_fulfil(
-            transfer_prepare.payer_fsp,
-            transfer_prepare.payee_fsp,
-            transfer_prepare.transfer_id,
-        ),
-        // TODO: more robust mechanism for finding the "ml api adapter service" service
-        "http://ml-api-adapter-service",
-    ).unwrap();
+    let req_put_transfer = transfer::TransferFulfilRequest::new(
+        transfer_prepare.payer_fsp,
+        transfer_prepare.payee_fsp,
+        transfer_prepare.transfer_id,
+    );
     println!("Sending PUT /transfer {:?}", req_put_transfer);
-    let request = reqwest::Request::try_from(req_put_transfer).unwrap();
-    http_client.execute(request).await.unwrap();
-    println!("Sent PUT /transfer with ID {}", transfer_prepare.transfer_id);
+    match transfer_client.lock().await.send(req_put_transfer.into()).await {
+        Ok(_) => {
+            println!("Sent PUT /transfer with ID {}", transfer_prepare.transfer_id);
+        }
+        e => {
+            println!("Failed to send PUT /transfer with ID {:?}. Error:", e);
+        }
+    }
     Ok("")
 }

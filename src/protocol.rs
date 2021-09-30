@@ -9,10 +9,10 @@ use ts_rs::{TS, export};
 #[cfg_attr(feature = "typescript_types", derive(TS))]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TransferMessage {
-    pub msg_sender: common::FspId,
-    pub msg_recipient: common::FspId,
-    pub currency: common::Currency,
-    pub amount: common::Amount,
+    pub msg_sender: FspId,
+    pub msg_recipient: FspId,
+    pub currency: Currency,
+    pub amount: Amount,
     // If we have the caller provide the transfer ID, we can use this as a unique message reference
     // for this message sequence with this caller.
     pub transfer_id: transfer::TransferId,
@@ -21,8 +21,8 @@ pub struct TransferMessage {
 #[cfg_attr(feature = "typescript_types", derive(TS))]
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct AccountInitialization {
-    pub currency: common::Currency,
-    pub initial_position: common::Amount,
+    pub currency: Currency,
+    pub initial_position: Amount,
     pub ndc: u32,
 }
 
@@ -78,13 +78,13 @@ pub struct TransferCompleteMessage {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TransferErrorMessage {
     pub id: transfer::TransferId,
-    pub response: common::ErrorResponse,
+    pub response: ErrorResponse,
 }
 
 #[cfg_attr(feature = "typescript_types", derive(TS))]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ClientParticipant {
-    pub name: common::FspId,
+    pub name: FspId,
     pub account: AccountInitialization,
 }
 
@@ -92,7 +92,7 @@ pub struct ClientParticipant {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SettlementWindowCloseFailedMessage {
     pub id: settlement_windows::SettlementWindowId,
-    pub response: fspiox_api::common::ErrorResponse,
+    pub response: fspiox_api::ErrorResponse,
 }
 
 #[cfg_attr(feature = "typescript_types", derive(TS))]
@@ -147,13 +147,13 @@ export! {
     settlement::WindowParametersNewSettlement,
     participants::HubAccount,
     participants::HubAccountType,
-    common::FspId,
-    common::DateTime,
-    common::Amount,
-    common::Currency,
-    common::ErrorResponse,
-    common::ErrorInformation,
-    common::MojaloopApiError,
+    FspId,
+    DateTime,
+    Amount,
+    Currency,
+    ErrorResponse,
+    ErrorInformation,
+    MojaloopApiError,
     ServerMessage,
     ClientMessage => "clients/typescript/src/lib/protocol.ts"
 }
