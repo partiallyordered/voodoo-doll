@@ -281,7 +281,7 @@ async fn client_message(
                 println!("Create settlement request: {:?}", create_settlement_req);
                 let result = moja_clients.settlement.send(create_settlement_req.into()).await;
                 if let Ok(settlement_service::Response::PostSettlement(res)) = result {
-                    client_data.send(&protocol::ServerMessage::NewSettlementCreated(res));
+                    client_data.send(&protocol::ServerMessage::NewSettlementCreated(res.des().await?));
                 } else {
                     handle_failed_match(result);
                 }
@@ -295,7 +295,7 @@ async fn client_message(
             if let Some(client_data) = clients.write().await.get_mut(&client_id) {
                 let result = moja_clients.settlement.send(query_params.into()).await;
                 if let Ok(settlement_service::Response::GetSettlements(res)) = result {
-                    client_data.send(&protocol::ServerMessage::Settlements(res));
+                    client_data.send(&protocol::ServerMessage::Settlements(res.des().await?));
                 } else {
                     handle_failed_match(result);
                 }
@@ -309,7 +309,7 @@ async fn client_message(
             if let Some(client_data) = clients.write().await.get_mut(&client_id) {
                 let result = moja_clients.settlement.send(query_params.into()).await;
                 if let Ok(settlement_service::Response::GetSettlementWindows(res)) = result {
-                    client_data.send(&protocol::ServerMessage::SettlementWindows(res));
+                    client_data.send(&protocol::ServerMessage::SettlementWindows(res.des().await?));
                 } else {
                     handle_failed_match(result);
                 }
@@ -344,6 +344,7 @@ async fn client_message(
                             println!("Polling attempt #{} to retrieve settlement window {} state. State: {:?}", n, close_msg.id, get_window_result);
                             match get_window_result {
                                 Ok(settlement_service::Response::GetSettlementWindow(window)) => {
+                                    let window = window.des().await?;
                                     if window.state == settlement_windows::SettlementWindowState::Closed {
                                         println!(
                                             "Finished polling for settlement window {} closure. Window closed.",
@@ -471,6 +472,7 @@ async fn client_message(
                     };
                     let response = moja_clients.central_ledger.send(new_participant_req.into()).await;
                     if let Ok(cl_service::Response::PostParticipant(new_participant)) = response {
+                        let new_participant = new_participant.des().await?;
                         let participant_init_req = participants::PostInitialPositionAndLimits {
                             initial_position_and_limits: participants::InitialPositionAndLimits {
                                 currency: account_init.currency,
