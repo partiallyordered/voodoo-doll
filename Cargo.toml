@@ -35,3 +35,8 @@ ts-rs = { git = "https://github.com/Aleph-Alpha/ts-rs", rev = "ddd461522591a90b9
 
 [features]
 typescript_types = ["ts-rs"]
+
+[build-dependencies]
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+lazy_static = "1.4.0"
