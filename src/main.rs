@@ -231,10 +231,6 @@ async fn client_message(
 ) -> Result<()> {
     use mojaloop_api::central_ledger::participants;
     use mojaloop_api::settlement::{settlement, settlement_windows};
-    use mojaloop_api::clients::{
-        central_ledger as cl_service,
-        settlement as settlement_service,
-    };
 
     // TODO: consider replying with non-string messages with "go away"
     let msg = msg.to_str().map_err(|_| VoodooError::NonStringWebsocketMessageReceived)?;
@@ -279,12 +275,8 @@ async fn client_message(
             if let Some(client_data) = clients.write().await.get_mut(&client_id) {
                 let create_settlement_req = settlement::PostSettlement { new_settlement };
                 println!("Create settlement request: {:?}", create_settlement_req);
-                let result = moja_clients.settlement.send(create_settlement_req.into()).await;
-                if let Ok(settlement_service::Response::PostSettlement(res)) = result {
-                    client_data.send(&protocol::ServerMessage::NewSettlementCreated(res.des().await?));
-                } else {
-                    handle_failed_match(result);
-                }
+                let response = moja_clients.settlement.send(create_settlement_req).await?.des().await?;
+                client_data.send(&protocol::ServerMessage::NewSettlementCreated(response));
             } else {
                 // TODO: we should return something to the client indicating an error
                 println!("No client data found for connection!");
@@ -293,12 +285,8 @@ async fn client_message(
 
         protocol::ClientMessage::GetSettlements(query_params) => {
             if let Some(client_data) = clients.write().await.get_mut(&client_id) {
-                let result = moja_clients.settlement.send(query_params.into()).await;
-                if let Ok(settlement_service::Response::GetSettlements(res)) = result {
-                    client_data.send(&protocol::ServerMessage::Settlements(res.des().await?));
-                } else {
-                    handle_failed_match(result);
-                }
+                let result = moja_clients.settlement.send(query_params).await?.des().await?;
+                client_data.send(&protocol::ServerMessage::Settlements(result));
             } else {
                 // TODO: we should return something to the client indicating an error
                 println!("No client data found for connection!");
@@ -307,12 +295,8 @@ async fn client_message(
 
         protocol::ClientMessage::GetSettlementWindows(query_params) => {
             if let Some(client_data) = clients.write().await.get_mut(&client_id) {
-                let result = moja_clients.settlement.send(query_params.into()).await;
-                if let Ok(settlement_service::Response::GetSettlementWindows(res)) = result {
-                    client_data.send(&protocol::ServerMessage::SettlementWindows(res.des().await?));
-                } else {
-                    handle_failed_match(result);
-                }
+                let result = moja_clients.settlement.send(query_params).await?.des().await?;
+                client_data.send(&protocol::ServerMessage::SettlementWindows(result));
             } else {
                 // TODO: we should return something to the client indicating an error
                 println!("No client data found for connection!");
@@ -328,8 +312,8 @@ async fn client_message(
                         reason: close_msg.reason,
                     }
                 };
-                let close_result = match moja_clients.settlement.send(close_req.into()).await {
-                    Ok(settlement_service::Response::CloseSettlementWindow(_)) => {
+                let close_result = match moja_clients.settlement.send(close_req).await {
+                    Ok(_) => {
                         // Settlement window closure happens asynchronously for no reason that I
                         // can discern. So we need to poll central settlement for the window state
                         // until it's closed.
@@ -340,24 +324,16 @@ async fn client_message(
                             let window_req = settlement_windows::GetSettlementWindow {
                                 id: close_msg.id,
                             };
-                            let get_window_result = moja_clients.settlement.send(window_req.into()).await;
-                            println!("Polling attempt #{} to retrieve settlement window {} state. State: {:?}", n, close_msg.id, get_window_result);
-                            match get_window_result {
-                                Ok(settlement_service::Response::GetSettlementWindow(window)) => {
-                                    let window = window.des().await?;
-                                    if window.state == settlement_windows::SettlementWindowState::Closed {
-                                        println!(
-                                            "Finished polling for settlement window {} closure. Window closed.",
-                                            close_msg.id,
-                                        );
-                                        break Ok(
-                                            protocol::ServerMessage::SettlementWindowClosed(close_msg.id)
-                                        );
-                                    }
-                                }
-                                x => {
-                                    break Err(format!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", x));
-                                }
+                            let window = moja_clients.settlement.send(window_req).await?.des().await?;
+                            println!("Polling attempt #{} to retrieve settlement window {} state. State: {:?}", n, close_msg.id, window);
+                            if window.state == settlement_windows::SettlementWindowState::Closed {
+                                println!(
+                                    "Finished polling for settlement window {} closure. Window closed.",
+                                    close_msg.id,
+                                );
+                                break Ok(
+                                    protocol::ServerMessage::SettlementWindowClosed(close_msg.id)
+                                );
                             }
                             if n == 10 {
                                 break Err(
@@ -382,11 +358,9 @@ async fn client_message(
                             )
                         )
                     }
-                    // TODO: probably need a little more nuance than "x"
                     x => {
-                        Err(format!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", x))
+                        Err(format!("Unhandled error closing settlement window: {:?}", x))
                     }
-
                 };
                 match close_result {
                     Ok(msg) => {
@@ -421,7 +395,7 @@ async fn client_message(
                     //       error_description: "Add Party information error - Hub account has already been registered."
                     //     }
                     //   }
-                    if let Err(e) = moja_clients.central_ledger.send(create_account_req.into()).await {
+                    if let Err(e) = moja_clients.central_ledger.send(create_account_req).await {
                         println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", e);
                     }
                 }
@@ -470,32 +444,27 @@ async fn client_message(
                             name,
                         },
                     };
-                    let response = moja_clients.central_ledger.send(new_participant_req.into()).await;
-                    if let Ok(cl_service::Response::PostParticipant(new_participant)) = response {
-                        let new_participant = new_participant.des().await?;
-                        let participant_init_req = participants::PostInitialPositionAndLimits {
-                            initial_position_and_limits: participants::InitialPositionAndLimits {
-                                currency: account_init.currency,
-                                limit: participants::Limit {
-                                    r#type: participants::LimitType::NetDebitCap,
-                                    value: account_init.ndc,
-                                },
-                                initial_position: account_init.initial_position,
+                    let new_participant = moja_clients.central_ledger.send(new_participant_req).await?.des().await?;
+                    let participant_init_req = participants::PostInitialPositionAndLimits {
+                        initial_position_and_limits: participants::InitialPositionAndLimits {
+                            currency: account_init.currency,
+                            limit: participants::Limit {
+                                r#type: participants::LimitType::NetDebitCap,
+                                value: account_init.ndc,
                             },
-                            name,
-                        };
-                        moja_clients.central_ledger.send(participant_init_req.into()).await?;
+                            initial_position: account_init.initial_position,
+                        },
+                        name,
+                    };
+                    moja_clients.central_ledger.send(participant_init_req).await?;
 
-                        println!("Created participant {} for client", name);
-                        // TODO: Need to disable these participants when we're done with them
-                        client_data.participants.push(new_participant.name.clone());
-                        new_participants.push(protocol::ClientParticipant {
-                            name: new_participant.name,
-                            account: *account_init,
-                        });
-                    } else {
-                        handle_failed_match(response);
-                    }
+                    println!("Created participant {} for client", name);
+                    // TODO: Need to disable these participants when we're done with them
+                    client_data.participants.push(new_participant.name.clone());
+                    new_participants.push(protocol::ClientParticipant {
+                        name: new_participant.name,
+                        account: *account_init,
+                    });
                 }
 
                 client_data.send(&protocol::ServerMessage::AssignParticipants(new_participants));
@@ -524,7 +493,7 @@ async fn client_message(
                             // TODO: strip trailing slash
                             hostname: my_address.clone(),
                         };
-                        moja_clients.central_ledger.send(request.into()).await?;
+                        moja_clients.central_ledger.send(request).await?;
                         println!("Updated {:?} endpoint to {}.", callback_type, my_address.clone());
                     }
                 }
@@ -537,7 +506,7 @@ async fn client_message(
                         transfer.currency,
                         Some(transfer.transfer_id),
                 );
-                moja_clients.transfer.send(req_post_transfer.into()).await?;
+                moja_clients.transfer.send(req_post_transfer).await?;
 
                 println!("Storing in-flight message {}", transfer.transfer_id);
                 in_flight_msgs.write().await.insert(
@@ -577,7 +546,7 @@ async fn client_message(
                     settlement_model
                 };
 
-                match moja_clients.central_ledger.send(settlement_model_create_req.into()).await {
+                match moja_clients.central_ledger.send(settlement_model_create_req).await {
                     Ok(_) => {
                         client_data.send(&success_response);
                     },

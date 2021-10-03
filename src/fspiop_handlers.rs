@@ -71,7 +71,7 @@ pub(crate) async fn handle_post_transfers(
         transfer_prepare.transfer_id,
     );
     println!("Sending PUT /transfer {:?}", req_put_transfer);
-    match transfer_client.lock().await.send(req_put_transfer.into()).await {
+    match transfer_client.lock().await.send(req_put_transfer).await {
         Ok(_) => {
             println!("Sent PUT /transfer with ID {}", transfer_prepare.transfer_id);
         }
