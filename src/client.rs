@@ -1,13 +1,23 @@
 mod consts;
-use tokio_tungstenite::{client_async, tungstenite::protocol::Message};
-use kube::api::{Api, WatchEvent, ListParams};
+use tokio_tungstenite::client_async;
+use kube::api::{Api, WatchEvent, ListParams, PostParams, DeleteParams};
 use k8s_openapi::api::core::v1::Pod;
 use thiserror::Error;
+
+pub use tokio_tungstenite::tungstenite::protocol::Message;
 
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Connection failure: {0}")]
     ConnectionError(String),
+    #[error("Error creating pod: {0}")]
+    PodCreate(String),
+    #[error("Error connecting to pod: {0}")]
+    PodConnect(String),
+    #[error("Failed to fetch k8s pods: {0}")]
+    PodList(String),
+    #[error("Error deleting pod: {0}")]
+    PodDelete(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -43,21 +53,27 @@ pub async fn get_pod_stream<'a>(
     Ok(ws_stream)
 }
 
-pub async fn create(pods: Api<Pod>) -> Result<()> {
+pub async fn create(pods: Option<Api<Pod>>) -> Result<()> {
+    use kube::ResourceExt;
+    use futures::TryStreamExt;
     // TODO: here we fail if the pod exists or is being created/deleted- need to handle
     // this better.
+    let pods = match pods {
+        None => fspiox_api::clients::k8s::get_pods(&None, &None).await.map_err(|e| Error::PodList(e.to_string()))?,
+        Some(pods) => pods,
+    };
+    let pod = serde_json::from_value(consts::POD_JSON.clone()).unwrap();
     pods.create(
-        &kube::api::PostParams::default(),
-        consts::POD,
-        // serde_json::from_value(consts::POD_JSON).unwrap(),
-    ).await?;
+        &PostParams::default(),
+        &pod,
+    ).await.map_err(|e| Error::PodCreate(e.to_string()))?;
 
     // Wait until the pod is running
     let lp = ListParams::default()
         .fields(format!("metadata.name={}", &consts::POD_NAME).as_str())
         .timeout(30);
-    let mut stream = pods.watch(&lp, "0").await?.boxed();
-    while let Some(status) = stream.try_next().await? {
+    let mut stream = Box::pin(pods.watch(&lp, "0").await.map_err(|e| Error::PodConnect(e.to_string()))?);
+    while let Some(status) = stream.try_next().await.map_err(|e| Error::PodConnect(e.to_string()))? {
         match status {
             WatchEvent::Added(o) => {
                 println!("Added {}", o.name());
@@ -71,4 +87,15 @@ pub async fn create(pods: Api<Pod>) -> Result<()> {
             _ => {}
         }
     }
+    Ok(())
+}
+
+pub async fn destroy(pods: Option<Api<Pod>>) -> Result<()> {
+    let pods = match pods {
+        None => fspiox_api::clients::k8s::get_pods(&None, &None).await.map_err(|e| Error::PodList(e.to_string()))?,
+        Some(pods) => pods,
+    };
+    pods.delete(consts::POD_NAME, &DeleteParams::default()).await
+        .and(Ok(()))
+        .map_err(|e| Error::PodDelete(e.to_string()))
 }
