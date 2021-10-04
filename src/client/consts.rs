@@ -5,15 +5,15 @@ pub const LABEL_NAME: &'static str = "app.kubernetes.io/name";
 pub const LABEL_VALUE: &'static str = "voodoo-doll";
 pub const CONTAINER_NAME: &'static str = "app";
 pub const CONTAINER_PORT: i32 = 3030;
+pub const POD_NAME: &'static str = "voodoo-doll";
 
 lazy_static! {
-    // static ref POD: Regex = Regex::new(r".*Settlement model.*already exists.*").unwrap();
-    pub static ref POD: serde_json::Value = json!(
+    pub static ref POD_JSON: serde_json::Value = json!(
         {
           "apiVersion": "v1",
           "kind": "Pod",
           "metadata": {
-            "name": "voodoo-doll",
+            "name": POD_NAME,
             "labels": {
               LABEL_NAME: LABEL_VALUE
             }
@@ -44,38 +44,41 @@ lazy_static! {
         }
     );
 }
-// pub const POD: serde_json::Value = json!(
-//     {
-//       "apiVersion": "v1",
-//       "kind": "Pod",
-//       "metadata": {
-//         "name": "voodoo-doll",
-//         "labels": {
-//           LABEL_NAME: LABEL_VALUE
-//         }
-//       },
-//       "spec": {
-//         "containers": [
-//           {
-//             "name": CONTAINER_NAME,
-//             "image": format!("ghcr.io/partiallyordered/voodoo-doll:{}", env!("CARGO_PKG_VERSION")),
-//             "ports": [
-//               {
-//                 "containerPort": CONTAINER_PORT
-//               }
-//             ],
-//             "env": [
-//               {
-//                 "name": "HOST_IP",
-//                 "valueFrom": {
-//                   "fieldRef": {
-//                     "fieldPath": "status.podIP"
-//                   }
-//                 }
-//               }
-//             ]
-//           }
-//         ]
-//       }
-//     }
-// );
+lazy_static! {
+    pub static ref POD: &'static str = serde_json::from_value(&POD_JSON).unwrap();
+    // pub static ref POD: &'static str = serde_json::from_value(json!(
+    //     {
+    //       "apiVersion": "v1",
+    //       "kind": "Pod",
+    //       "metadata": {
+    //         "name": POD_NAME,
+    //         "labels": {
+    //           LABEL_NAME: LABEL_VALUE
+    //         }
+    //       },
+    //       "spec": {
+    //         "containers": [
+    //           {
+    //             "name": CONTAINER_NAME,
+    //             "image": format!("ghcr.io/partiallyordered/voodoo-doll:{}", env!("CARGO_PKG_VERSION")),
+    //             "ports": [
+    //               {
+    //                 "containerPort": CONTAINER_PORT
+    //               }
+    //             ],
+    //             "env": [
+    //               {
+    //                 "name": "HOST_IP",
+    //                 "valueFrom": {
+    //                   "fieldRef": {
+    //                     "fieldPath": "status.podIP"
+    //                   }
+    //                 }
+    //               }
+    //             ]
+    //           }
+    //         ]
+    //       }
+    //     }
+    // )).unwrap();
+}

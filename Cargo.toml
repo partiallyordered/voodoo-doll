@@ -26,6 +26,10 @@ strum = "0.21"
 rand = { version = "0.8", features = ["std_rng"] }
 regex = "1.5.4"
 lazy_static = "1.4.0"
+tokio-tungstenite = "0.14"
+kube = { git = "https://github.com/kazk/kube-rs", rev = "e1b02c57d9ebd5bbf0d93b244a7be4b7438d3b66", features = ["ws"], optional = true }
+kube-runtime = { version = "0.56.0", optional = true }
+k8s-openapi = { version = "0.11.0", default-features = false, features = ["v1_20"], optional = true }
 
 # optional
 # At the time of writing we need to use the git version as internally tagged unions are not yet in
