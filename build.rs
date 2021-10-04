@@ -1,5 +1,3 @@
-
-use serde_json::json;
 use std::fs;
 use std::path::Path;
 #[path = "src/client/consts.rs"] mod client_consts;
