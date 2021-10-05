@@ -1,0 +1,1 @@
+{"apiVersion":"rbac.authorization.k8s.io/v1","kind":"ClusterRole","metadata":{"name":"voodoo-doll-pod-access"},"rules":[{"apiGroups":[""],"resources":["pods"],"verbs":["get","watch","list"]},{"apiGroups":[""],"resources":["pods/portforward"],"verbs":["create","update","delete","watch","get","list"]}]}

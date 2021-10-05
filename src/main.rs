@@ -193,6 +193,9 @@ async fn ws_connection_handler(
         }
     }));
 
+    // TODO: what is the default namespace? If we're running inside a cluster and we use defaults,
+    // will the default namespace be "default" (or whatever is set as the default cluster
+    // namespace), or will it be the namespace we're running in?
     let mut moja_clients = match mojaloop_api::clients::k8s::get_all_from_k8s(&None, &None, None).await {
         Err(e) => {
             panic!("Couldn't connect to switch for websocket client: {}", e);
