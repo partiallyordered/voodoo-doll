@@ -42,10 +42,10 @@ export class VoodooClient extends WebSocket {
                 default: {
                     // Did you get a compile error here? This code is written such that if every
                     // case in the above switch state is not handled, compilation will fail. Why?
-                    // Well, as a matter of fact, we *could* receive a message that is not of the
-                    // type we're interested in, but we *shouldn't*, and when we receive a message
-                    // of the type we _are_ interested in, we want to be sure we've handled it and
-                    // emitted it to our listeners as a correctly typed event.
+                    // Well, as a matter of fact, we can receive a message that is not of the type
+                    // we're interested in, but when we receive a message of the type we _are_
+                    // interested in, we want to be sure we've handled it and emitted it to our
+                    // listeners as a correctly typed event.
                     const exhaustiveCheck: never = m;
                     throw new Error(`Unhandled message type: ${exhaustiveCheck}`);
                 }
@@ -60,29 +60,22 @@ export class VoodooClient extends WebSocket {
     // Exchange a single request-response pair with the server
     exchange<ServerResponse extends protocol.ServerMessage['value']>(
         sendMsg: protocol.ClientMessage,
-        recvMsgDiscriminators: protocol.ServerMessage['type'][],
+        recvMsgDiscriminator: protocol.ServerMessage['type'],
         timeoutMs: number = this.defaultTimeout,
     ): PromiseLike<ServerResponse> {
         return new Promise((resolve, reject) => {
-            const exchangeType = `${sendMsg.type}-{${recvMsgDiscriminators.join(', ')}}`;
+            const exchangeType = `${sendMsg.type}-${recvMsgDiscriminator}`;
             trace(`Beginning ${exchangeType} exchange. Timeout after ${timeoutMs}ms.`);
             const t = setTimeout(
                 () => reject(new Error(`${exchangeType} exchange timed out after ${timeoutMs}ms`)),
                 timeoutMs
             );
 
-            const handler = (m: ServerResponse) => {
-                trace(`Received ${m.type} message for ${exchangeType} exchange`);
+            this.once(recvMsgDiscriminator, (m: ServerResponse) => {
+                trace(`Received ${recvMsgDiscriminator} message for ${exchangeType} exchange`);
                 clearTimeout(t);
-                recvMsgDiscriminators.forEach(
-                    (discriminator: protocol.ServerMessage['type']) => this.off(discriminator, handler)
-                );
                 resolve(m);
-            };
-
-            recvMsgDiscriminators.forEach(
-                (discriminator: protocol.ServerMessage['type']) => this.once(discriminator, handler)
-            );
+            });
 
             trace(`Sending ${sendMsg.type} message for ${exchangeType} exchange`);
             this.send(sendMsg);
