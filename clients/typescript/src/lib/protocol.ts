@@ -45,7 +45,8 @@ export type SettlementWindowState =
   | "CLOSED"
   | "PENDING_SETTLEMENT"
   | "SETTLED"
-  | "ABORTED";
+  | "ABORTED"
+  | "PROCESSING";
 
 export interface SettlementWindowContent {
   id: SettlementWindowContentId;
@@ -93,13 +94,15 @@ export interface SettlementModel {
   autoPositionReset: boolean;
   ledgerAccountType: LedgerAccountType;
   settlementAccountType: SettlementAccountType;
-  name: string;
+  name: SettlementModelName;
   requireLiquidityCheck: boolean;
   settlementDelay: SettlementDelay;
   settlementGranularity: SettlementGranularity;
   settlementInterchange: SettlementInterchange;
   currency: Currency;
 }
+
+export type SettlementModelName = string;
 
 export interface GetSettlements {
   currency: Currency | null;

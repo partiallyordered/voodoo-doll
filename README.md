@@ -1,7 +1,18 @@
 # voodoo-doll
 An in-cluster Mojaloop participant simulator intended for temporary deployment by mojo
 
+## Build
+```sh
+cargo b --all-features
+```
+
+## Generate Typescript protocol
+```sh
+cargo t --features=typescript_types
+```
+
 ### TODO
+- Change pod to deployment, easier to change version, especially with Skaffold
 - Document client features, and required features
 - Extend clients to support
   - convenient deployment/detection of voodoo-doll

@@ -2,74 +2,46 @@
 // https://kubernetes.io/docs/concepts/containers/container-environment/
 // It's possible to use hostname -i, so probably possible from code
 
-use std::collections::HashMap;
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
-};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use futures::{FutureExt, StreamExt};
 use tokio::time::{sleep, Duration};
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use warp::ws::{Message, WebSocket};
+use warp::ws;
 use warp::Filter;
 use thiserror::Error;
 use regex::Regex;
 use lazy_static::lazy_static;
 
-use fspiox_api::*;
+use fspiox_api::{FspId, transfer};
 mod protocol;
+mod control_plane;
+mod fspiop_handlers;
+use crate::fspiop_handlers::*;
 
 #[derive(Error, Debug)]
 enum VoodooError {
-    // TODO: wherever we use ResponseConversionError, we should actually print the response that we
-    // couldn't deserialize. This makes debugging much, much easier.
-    #[error("Couldn't deserialize switch response into expected type. Error: {0}")]
-    ResponseConversionError(String),
-    #[error("Couldn't convert from http::request to reqwest::Request")]
-    RequestConversionError,
     #[error("Received a non-string websocket message from client")]
     NonStringWebsocketMessageReceived,
     #[error("Unrecognised message received from client. Error: {0}. Message: {1}")]
     WebsocketMessageDeserializeFailed(String, String),
-    #[error("Typed an invalid URL in the code. Need a unit test for this..")]
-    InvalidUrl,
     #[error("HOST_IP environment variable not set")]
     HostIpNotFound,
-    #[error("HTTP error occurred while {0}. Error message: {1}.")]
-    HttpError(&'static str, String),
+    #[error("Switch client error: {0}")]
+    ClientError(String),
 }
 
-type Result<T> = std::result::Result<T, VoodooError>;
+impl From<mojaloop_api::clients::Error> for VoodooError {
+    fn from(client_error: mojaloop_api::clients::Error) -> VoodooError {
+        VoodooError::ClientError(client_error.to_string())
+    }
+}
 
 static CLIENT_ID_COUNTER: AtomicUsize = AtomicUsize::new(1);
 
-struct ClientData {
-    chan: mpsc::UnboundedSender<std::result::Result<Message, warp::Error>>,
-    participants: Vec<common::FspId>,
-}
-
-type ClientId = usize;
-type Clients = Arc<RwLock<HashMap<ClientId, ClientData>>>;
-
-#[derive(Hash, PartialEq, Eq, Debug)]
-enum FspiopMessageId {
-    TransferId(transfer::TransferId),
-}
-
-/// FSPIOP messages that we've sent that we're expecting a callback for, mapped to the client that
-/// requested them.
-type InFlightFspiopMessages = Arc<RwLock<HashMap<FspiopMessageId, ClientId>>>;
-
-// TODO: implement this properly to return an actual FSPIOP error. Or perhaps add warp-specific
-// return value implementations to the fspiox-api FspiopError.
-#[derive(Error, Debug)]
-enum FspiopError {
-    #[error("Request body couldn't be deserialized: {0}")]
-    MalformedRequestBody(String),
-}
-impl warp::reject::Reject for FspiopError {}
+type Result<T> = std::result::Result<T, VoodooError>;
+impl warp::reject::Reject for control_plane::FspiopError {}
 
 // We implement a json body handler here because warp::body::json() also enforces the content-type
 // header to equal application/json. This doesn't work for us.
@@ -77,7 +49,7 @@ fn json_body<T: serde::de::DeserializeOwned + Send>() -> impl warp::Filter<Extra
     warp::body::bytes().and_then(|buf: hyper::body::Bytes| async move {
         serde_json::from_slice::<T>(&buf)
             // .map_err(|e| warp::reject::known(warp::filters::body::BodyDeserializeError { cause: e }))
-            .map_err(|e| warp::reject::custom(FspiopError::MalformedRequestBody(e.to_string())))
+            .map_err(|e| warp::reject::custom(control_plane::FspiopError::MalformedRequestBody(e.to_string())))
     })
 }
 
@@ -89,9 +61,9 @@ async fn handle_rejection(err: warp::reject::Rejection) -> std::result::Result<i
     if err.is_not_found() {
         code = StatusCode::NOT_FOUND;
         message = "NOT_FOUND";
-    } else if let Some(e) = err.find::<FspiopError>() {
+    } else if let Some(e) = err.find::<control_plane::FspiopError>() {
         match e {
-            FspiopError::MalformedRequestBody(s) => {
+            control_plane::FspiopError::MalformedRequestBody(s) => {
                 code = StatusCode::BAD_REQUEST;
                 message = s;
             }
@@ -123,8 +95,17 @@ async fn handle_rejection(err: warp::reject::Rejection) -> std::result::Result<i
 
 #[tokio::main]
 async fn main() {
-    let clients = Clients::default();
-    let in_flight_msgs = InFlightFspiopMessages::default();
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+    use mojaloop_api::clients::FspiopClient;
+    let clients = control_plane::Clients::default();
+    let in_flight_msgs = control_plane::InFlightFspiopMessages::default();
+
+    // TODO: attempt to detect whether we're running in k8s and make a loud error if we're not.
+    // In fact, we're not going to achieve anything if we can't infer the kubeconfig from the
+    // environment, so we should try to do that, and if we fail we'll die.
+    // In fact, this will manifest as a mojaloop_api::clients::k8s::Error::UnableToLoadKubeconfig
+    // error. We could also just call Client::try_default() or something?
 
     // GET /voodoo -> websocket upgrade
     let voodoo = warp::path("voodoo")
@@ -150,16 +131,22 @@ async fn main() {
                 handle_put_transfers(transfer_id, transfer_fulfil, in_flight_msgs.clone(), clients.clone())
         });
 
+    let transfer_client = Arc::new(Mutex::new(
+        mojaloop_api::clients::transfer::Client::from_k8s_defaults().await.unwrap()
+    ));
     // POST /transfers
     let post_transfers = warp::post()
         .and(warp::path("transfers"))
         .and(warp::path::end())
         .and(json_body())
-        // TODO: does this create a new client per-request? I guess so? Avoid this..
-        .and(warp::any().map(|| reqwest::Client::new()))
+        // .and_then({
+        //     move |transfer_prepare: transfer::TransferPrepareRequestBody|
+        //         handle_post_transfers(transfer_prepare, transfer_client)
+        // });
+        .and(warp::any().map({ let client = transfer_client.clone(); move || client.clone()}))
         .and_then({
-            move |transfer_prepare: transfer::TransferPrepareRequestBody, http_client|
-                handle_post_transfers(transfer_prepare, http_client)
+            move |transfer_prepare: transfer::TransferPrepareRequestBody, client: Arc<Mutex<mojaloop_api::clients::transfer::Client>>|
+                handle_post_transfers(transfer_prepare, client)
         });
 
     // PUT /transfers/{id}/error
@@ -172,7 +159,7 @@ async fn main() {
         .and_then({
             let clients = clients.clone();
             let in_flight_msgs = in_flight_msgs.clone();
-            move |transfer_id: transfer::TransferId, transfer_error: fspiox_api::common::ErrorResponse|
+            move |transfer_id: transfer::TransferId, transfer_error: fspiox_api::ErrorResponse|
                 handle_put_transfers_error(transfer_id, transfer_error, in_flight_msgs.clone(), clients.clone())
         });
 
@@ -187,92 +174,11 @@ async fn main() {
     warp::serve(routes).run(([0, 0, 0, 0], 3030)).await;
 }
 
-async fn handle_put_transfers(
-    transfer_id: transfer::TransferId,
-    transfer_fulfil: transfer::TransferFulfilRequestBody,
-    in_flight_msgs: InFlightFspiopMessages,
-    clients: Clients,
-) -> std::result::Result<impl warp::Reply, std::convert::Infallible> {
-    match in_flight_msgs.read().await.get(&FspiopMessageId::TransferId(transfer_id)) {
-        // TODO: assert that the transfer ID in the URI matches the transfer ID in the payload?
-        Some(client_id) => {
-            println!("Transfer fulfil received | {:?}", transfer_fulfil);
-            if let Some(client_data) = clients.write().await.get_mut(client_id) {
-                let msg_text = serde_json::to_string(&protocol::ServerMessage::TransferComplete(
-                    protocol::TransferCompleteMessage {
-                        id: transfer_id,
-                    }
-                )).unwrap();
-                println!("Sending message to client: {}", msg_text);
-                if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg_text))) {
-                    // Disconnect handled elsewhere
-                    println!("Client disconnected, failed to send");
-                }
-            } else {
-                println!("No client found for transfer");
-            }
-        }
-        None => println!("Received unrecognised FSPIOP transfer prepare message")
-    }
-    Ok("")
-}
-
-async fn handle_put_transfers_error(
-    transfer_id: transfer::TransferId,
-    transfer_error: fspiox_api::common::ErrorResponse,
-    in_flight_msgs: InFlightFspiopMessages,
-    clients: Clients,
-) -> std::result::Result<impl warp::Reply, std::convert::Infallible> {
-    match in_flight_msgs.read().await.get(&FspiopMessageId::TransferId(transfer_id)) {
-        // TODO: assert that the transfer ID in the URI matches the transfer ID in the payload?
-        Some(client_id) => {
-            println!("Transfer error received {} | {:?}", transfer_id, transfer_error);
-            if let Some(client_data) = clients.write().await.get_mut(client_id) {
-                let msg_text = serde_json::to_string(&protocol::ServerMessage::TransferError(
-                    protocol::TransferErrorMessage {
-                        id: transfer_id,
-                        response: transfer_error,
-                    }
-                )).unwrap();
-                if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg_text))) {
-                    // Disconnect handled elsewhere
-                    println!("Client disconnected, failed to send");
-                }
-            } else {
-                println!("No client found for transfer");
-            }
-        }
-        None => println!(
-            "Received unrecognised FSPIOP transfer error message. ID: {:?}",
-            transfer_id,
-        )
-    }
-    Ok("")
-}
-
-async fn handle_post_transfers(
-    transfer_prepare: transfer::TransferPrepareRequestBody,
-    http_client: reqwest::Client,
-) -> std::result::Result<impl warp::Reply, std::convert::Infallible> {
-    use std::convert::TryFrom;
-    println!("Received POST /transfer {:?}", transfer_prepare);
-    let req_put_transfer = to_http_request(
-        build_transfer_fulfil(
-            transfer_prepare.payer_fsp,
-            transfer_prepare.payee_fsp,
-            transfer_prepare.transfer_id,
-        ),
-        // TODO: more robust mechanism for finding the "ml api adapter service" service
-        "http://ml-api-adapter-service",
-    ).unwrap();
-    println!("Sending PUT /transfer {:?}", req_put_transfer);
-    let request = reqwest::Request::try_from(req_put_transfer).unwrap();
-    http_client.execute(request).await.unwrap();
-    println!("Sent PUT /transfer with ID {}", transfer_prepare.transfer_id);
-    Ok("")
-}
-
-async fn ws_connection_handler(ws: WebSocket, clients: Clients, in_flight_msgs: InFlightFspiopMessages) {
+async fn ws_connection_handler(
+    ws: ws::WebSocket,
+    clients: control_plane::Clients,
+    in_flight_msgs: control_plane::InFlightFspiopMessages
+) {
     let client_id = CLIENT_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
 
     println!("voodoo client connected: {}", client_id);
@@ -283,24 +189,29 @@ async fn ws_connection_handler(ws: WebSocket, clients: Clients, in_flight_msgs: 
     let rx = UnboundedReceiverStream::new(rx);
     tokio::task::spawn(rx.forward(client_ws_tx).map(|result| {
         if let Err(e) = result {
-            eprintln!("websocket send error: {}", e);
+            eprintln!("Websocket send error: {}", e);
         }
     }));
 
-    clients.write().await.insert(client_id, ClientData { chan: tx, participants: Vec::new() });
+    let mut moja_clients = match mojaloop_api::clients::k8s::get_all_from_k8s(&None, &None, None).await {
+        Err(e) => {
+            panic!("Couldn't connect to switch for websocket client: {}", e);
+        },
+        Ok(cs) => cs
+    };
 
-    let http_client = reqwest::Client::new();
+    clients.write().await.insert(client_id, control_plane::ClientData { chan: tx, participants: Vec::new() });
 
     // Handle client messages
     while let Some(result) = client_ws_rx.next().await {
         let msg = match result {
             Ok(msg) => msg,
             Err(e) => {
-                eprintln!("websocket error(uid={}): {}", client_id, e);
+                eprintln!("Websocket error(uid={}): {}", client_id, e);
                 break;
             }
         };
-        if let Err(e) = client_message(client_id, &http_client, msg, &in_flight_msgs, &clients).await {
+        if let Err(e) = client_message(client_id, &mut moja_clients, msg, &in_flight_msgs, &clients).await {
             // TODO: let the client know they sent us something we couldn't handle
             println!("Uh oh: {}", e);
         };
@@ -313,11 +224,14 @@ async fn ws_connection_handler(ws: WebSocket, clients: Clients, in_flight_msgs: 
 
 async fn client_message(
     client_id: usize,
-    http_client: &reqwest::Client,
-    msg: Message,
-    in_flight_msgs: &InFlightFspiopMessages,
-    clients: &Clients,
+    moja_clients: &mut mojaloop_api::clients::k8s::Clients,
+    msg: ws::Message,
+    in_flight_msgs: &control_plane::InFlightFspiopMessages,
+    clients: &control_plane::Clients,
 ) -> Result<()> {
+    use mojaloop_api::central_ledger::participants;
+    use mojaloop_api::settlement::{settlement, settlement_windows};
+
     // TODO: consider replying with non-string messages with "go away"
     let msg = msg.to_str().map_err(|_| VoodooError::NonStringWebsocketMessageReceived)?;
     println!("Raw message from client: {}", msg);
@@ -325,11 +239,6 @@ async fn client_message(
     let msg_de: protocol::ClientMessage = serde_json::from_str(msg)
         .map_err(|e| VoodooError::WebsocketMessageDeserializeFailed(e.to_string(), msg.to_string()))?;
     println!("Deserialized message from client: {:?}", msg_de);
-
-    use mojaloop_api::common::to_request;
-    use mojaloop_api::central_ledger::participants;
-    use mojaloop_api::settlement::{settlement, settlement_windows};
-    use std::convert::TryFrom;
 
     // TODO: Get this at startup and panic if it fails. If it fails once, it will always fail.
     // TODO: Assert hostname is valid URI using url::Uri::parse?
@@ -341,43 +250,33 @@ async fn client_message(
     #[derive(serde::Deserialize, Debug)]
     #[serde(untagged)]
     enum MlApiResponse<T> {
-        Err(fspiox_api::common::ErrorResponse),
+        Err(fspiox_api::ErrorResponse),
         Response(T),
     }
     #[derive(serde::Deserialize, Debug)]
     struct Empty {}
 
+    fn handle_failed_match<T: std::fmt::Debug>(res: mojaloop_api::clients::Result<T>) {
+        match res {
+            Ok(m) => {
+                println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", m);
+            }
+            Err(mojaloop_api::clients::Error::MojaloopApiError(e)) => {
+                println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", e);
+            }
+            Err(e) => {
+                println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", e);
+            }
+        }
+    }
+
     match msg_de {
         protocol::ClientMessage::CreateSettlement(new_settlement) => {
             if let Some(client_data) = clients.write().await.get_mut(&client_id) {
-                let create_settlement_req =
-                    reqwest::Request::try_from(
-                        to_request(
-                            settlement::PostSettlement { new_settlement },
-                            "http://centralsettlement-service",
-                        ).map_err(|_| VoodooError::InvalidUrl)?
-                    ).map_err(|_| VoodooError::RequestConversionError)?;
+                let create_settlement_req = settlement::PostSettlement { new_settlement };
                 println!("Create settlement request: {:?}", create_settlement_req);
-                let result = http_client.execute(create_settlement_req).await
-                    .map_err(|e| VoodooError::HttpError("retrieving settlements", e.to_string()))?;
-                let result_text = result.text().await.unwrap();
-                println!("Create settlement response: {:?}", result_text);
-                let result = serde_json::from_str::<MlApiResponse<settlement::Settlement>>(&result_text)
-                    .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
-                match result {
-                    MlApiResponse::Err(ml_err) => {
-                        println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", ml_err);
-                    },
-                    MlApiResponse::Response(resp) => {
-                        let msg_text = serde_json::to_string(
-                            &protocol::ServerMessage::NewSettlementCreated(resp)
-                        ).unwrap();
-                        if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg_text))) {
-                            // Disconnect handled elsewhere
-                            println!("Client disconnected, failed to send");
-                        }
-                    }
-                };
+                let response = moja_clients.settlement.send(create_settlement_req).await?.des().await?;
+                client_data.send(&protocol::ServerMessage::NewSettlementCreated(response));
             } else {
                 // TODO: we should return something to the client indicating an error
                 println!("No client data found for connection!");
@@ -386,34 +285,8 @@ async fn client_message(
 
         protocol::ClientMessage::GetSettlements(query_params) => {
             if let Some(client_data) = clients.write().await.get_mut(&client_id) {
-                let get_settlements_req =
-                    reqwest::Request::try_from(
-                        to_request(
-                            query_params,
-                            "http://centralsettlement-service",
-                        ).map_err(|_| VoodooError::InvalidUrl)?
-                    ).map_err(|_| VoodooError::RequestConversionError)?;
-                println!("Get settlements request: {:?}", get_settlements_req);
-                let result = http_client.execute(get_settlements_req).await
-                    .map_err(|e| VoodooError::HttpError("retrieving settlements", e.to_string()))?;
-                let result_text = result.text().await.unwrap();
-                println!("Get settlements response: {:?}", result_text);
-                let result = serde_json::from_str::<MlApiResponse<settlement::Settlements>>(&result_text)
-                    .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
-                match result {
-                    MlApiResponse::Err(ml_err) => {
-                        println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", ml_err);
-                    },
-                    MlApiResponse::Response(resp) => {
-                        let msg_text = serde_json::to_string(
-                            &protocol::ServerMessage::Settlements(resp)
-                        ).unwrap();
-                        if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg_text))) {
-                            // Disconnect handled elsewhere
-                            println!("Client disconnected, failed to send");
-                        }
-                    }
-                };
+                let result = moja_clients.settlement.send(query_params).await?.des().await?;
+                client_data.send(&protocol::ServerMessage::Settlements(result));
             } else {
                 // TODO: we should return something to the client indicating an error
                 println!("No client data found for connection!");
@@ -422,36 +295,8 @@ async fn client_message(
 
         protocol::ClientMessage::GetSettlementWindows(query_params) => {
             if let Some(client_data) = clients.write().await.get_mut(&client_id) {
-                let get_windows_req =
-                    reqwest::Request::try_from(
-                        to_request(
-                            query_params,
-                            "http://centralsettlement-service",
-                        ).map_err(|_| VoodooError::InvalidUrl)?
-                    ).map_err(|_| VoodooError::RequestConversionError)?;
-                println!("Get settlement windows request: {:?}", get_windows_req);
-                let result = http_client.execute(get_windows_req).await
-                    .map_err(|e| VoodooError::HttpError("retrieving settlement windows", e.to_string()))?;
-                    // .json::<MlApiResponse<settlement_windows::SettlementWindows>>().await
-                    // .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
-                let result_text = result.text().await.unwrap();
-                println!("Get settlement windows response: {:?}", result_text);
-                let result = serde_json::from_str::<MlApiResponse<settlement_windows::SettlementWindows>>(&result_text)
-                    .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
-                match result {
-                    MlApiResponse::Err(ml_err) => {
-                        println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", ml_err);
-                    },
-                    MlApiResponse::Response(resp) => {
-                        let msg_text = serde_json::to_string(
-                            &protocol::ServerMessage::SettlementWindows(resp)
-                        ).unwrap();
-                        if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg_text))) {
-                            // Disconnect handled elsewhere
-                            println!("Client disconnected, failed to send");
-                        }
-                    }
-                };
+                let result = moja_clients.settlement.send(query_params).await?.des().await?;
+                client_data.send(&protocol::ServerMessage::SettlementWindows(result));
             } else {
                 // TODO: we should return something to the client indicating an error
                 println!("No client data found for connection!");
@@ -460,39 +305,15 @@ async fn client_message(
 
         protocol::ClientMessage::CloseSettlementWindow(close_msg) => {
             if let Some(client_data) = clients.write().await.get_mut(&client_id) {
-                let close_window_req =
-                    reqwest::Request::try_from(
-                        to_request(
-                            settlement_windows::CloseSettlementWindow {
-                                id: close_msg.id,
-                                payload: settlement_windows::SettlementWindowClosurePayload {
-                                    state: settlement_windows::SettlementWindowCloseState::Closed,
-                                    reason: close_msg.reason,
-                                }
-                            },
-                            "http://centralsettlement-service",
-                        ).map_err(|_| VoodooError::InvalidUrl)?
-                    ).map_err(|_| VoodooError::RequestConversionError)?;
-                println!("Closing settlement window {}", close_msg.id);
-                let result = http_client.execute(close_window_req).await
-                    .map_err(|e| VoodooError::HttpError("closing settlement window", e.to_string()))?
-                    .json::<MlApiResponse<Empty>>().await
-                    .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
-                println!("Close settlement window result {:?}", result);
-                let close_result = match result {
-                    MlApiResponse::Err(ml_err) => {
-                        Ok(
-                            serde_json::to_string(
-                                &protocol::ServerMessage::SettlementWindowCloseFailed(
-                                    protocol::SettlementWindowCloseFailedMessage {
-                                        id: close_msg.id,
-                                        response: ml_err,
-                                    }
-                                )
-                            ).unwrap()
-                        )
-                    },
-                    MlApiResponse::Response(_) => {
+                let close_req = settlement_windows::CloseSettlementWindow {
+                    id: close_msg.id,
+                    payload: settlement_windows::SettlementWindowClosurePayload {
+                        state: settlement_windows::SettlementWindowCloseState::Closed,
+                        reason: close_msg.reason,
+                    }
+                };
+                let close_result = match moja_clients.settlement.send(close_req).await {
+                    Ok(_) => {
                         // Settlement window closure happens asynchronously for no reason that I
                         // can discern. So we need to poll central settlement for the window state
                         // until it's closed.
@@ -500,39 +321,19 @@ async fn client_message(
                         println!("Begin polling for settlement window {} closure", close_msg.id);
                         let mut n = 1;
                         loop {
-                            let window_req =
-                                reqwest::Request::try_from(
-                                    to_request(
-                                        settlement_windows::GetSettlementWindow {
-                                            id: close_msg.id,
-                                        },
-                                        "http://centralsettlement-service",
-                                    ).map_err(|_| VoodooError::InvalidUrl)?
-                                ).map_err(|_| VoodooError::RequestConversionError)?;
-                            let get_window_result = http_client.execute(window_req).await
-                                .map_err(|e| VoodooError::HttpError("requesting settlement window", e.to_string()))?
-                                .text().await.unwrap();
-                            println!("Get window result: {:?}", get_window_result);
-                            let get_window_result = serde_json::from_str::<MlApiResponse<settlement_windows::SettlementWindow>>(get_window_result.as_str())
-                                .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
-                            println!("Polling attempt #{} to retrieve settlement window {} state. State: {:?}", n, close_msg.id, get_window_result);
-                            match get_window_result {
-                                MlApiResponse::Err(ml_err) => {
-                                    break Err(format!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", ml_err));
-                                },
-                                MlApiResponse::Response(window) => {
-                                    if window.state == settlement_windows::SettlementWindowState::Closed {
-                                        println!(
-                                            "Finished polling for settlement window {} closure. Window closed.",
-                                            close_msg.id,
-                                        );
-                                        break Ok(
-                                            serde_json::to_string(
-                                                &protocol::ServerMessage::SettlementWindowClosed(close_msg.id)
-                                            ).unwrap()
-                                        );
-                                    }
-                                }
+                            let window_req = settlement_windows::GetSettlementWindow {
+                                id: close_msg.id,
+                            };
+                            let window = moja_clients.settlement.send(window_req).await?.des().await?;
+                            println!("Polling attempt #{} to retrieve settlement window {} state. State: {:?}", n, close_msg.id, window);
+                            if window.state == settlement_windows::SettlementWindowState::Closed {
+                                println!(
+                                    "Finished polling for settlement window {} closure. Window closed.",
+                                    close_msg.id,
+                                );
+                                break Ok(
+                                    protocol::ServerMessage::SettlementWindowClosed(close_msg.id)
+                                );
                             }
                             if n == 10 {
                                 break Err(
@@ -547,14 +348,24 @@ async fn client_message(
                             n = n + 1;
                         }
                     }
+                    Err(mojaloop_api::clients::Error::MojaloopApiError(ml_err)) => {
+                        Ok(
+                            protocol::ServerMessage::SettlementWindowCloseFailed(
+                                protocol::SettlementWindowCloseFailedMessage {
+                                    id: close_msg.id,
+                                    response: ml_err,
+                                }
+                            )
+                        )
+                    }
+                    x => {
+                        Err(format!("Unhandled error closing settlement window: {:?}", x))
+                    }
                 };
                 match close_result {
                     Ok(msg) => {
-                        println!("Sending message to client: {}", msg);
-                        if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg))) {
-                            // Disconnect handled elsewhere
-                            println!("Client disconnected, failed to send");
-                        }
+                        println!("Sending message to client: {:?}", msg);
+                        client_data.send(&msg);
                     }
                     Err(msg) => {
                         println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", msg);
@@ -569,18 +380,12 @@ async fn client_message(
         protocol::ClientMessage::CreateHubAccounts(accounts) => {
             if let Some(client_data) = clients.write().await.get_mut(&client_id) {
                 for account in &accounts {
-                    let create_account_req =
-                        reqwest::Request::try_from(
-                            to_request(
-                                participants::PostHubAccount {
-                                    // TODO: need to get hub name from switch; older versions
-                                    // of ML use "hub" instead of "Hub".
-                                    name: common::FspId::from("Hub").unwrap(),
-                                    account: *account,
-                                },
-                                "http://centralledger-service",
-                            ).map_err(|_| VoodooError::InvalidUrl)?
-                        ).map_err(|_| VoodooError::RequestConversionError)?;
+                    let create_account_req = participants::PostHubAccount {
+                        // TODO: need to get hub name from switch; older versions
+                        // of ML use "hub" instead of "Hub".
+                        name: FspId::from("Hub").unwrap(),
+                        account: *account,
+                    };
                     // TODO: we don't actually care about the json response here if the
                     // response code was a 2xx. If it wasn't, we might be interested in the
                     // following response:
@@ -590,24 +395,11 @@ async fn client_message(
                     //       error_description: "Add Party information error - Hub account has already been registered."
                     //     }
                     //   }
-                    let result = http_client.execute(create_account_req).await
-                        .map_err(|e| VoodooError::HttpError("creating hub account", e.to_string()))?
-                        .json::<MlApiResponse<Empty>>().await
-                        .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
-                    match result {
-                        MlApiResponse::Err(ml_err) => {
-                            println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", ml_err);
-                        },
-                        MlApiResponse::Response(_) => {}
+                    if let Err(e) = moja_clients.central_ledger.send(create_account_req).await {
+                        println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", e);
                     }
                 }
-                let msg_text = serde_json::to_string(
-                    &protocol::ServerMessage::HubAccountsCreated(accounts)
-                ).unwrap();
-                if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg_text))) {
-                    // Disconnect handled elsewhere
-                    println!("Client disconnected, failed to send");
-                }
+                client_data.send(&protocol::ServerMessage::HubAccountsCreated(accounts));
             } else {
                 // TODO: we should return something to the client indicating an error
                 println!("No client data found for connection!");
@@ -627,6 +419,7 @@ async fn client_message(
             if let Some(client_data) = clients.write().await.get_mut(&client_id) {
                 let mut new_participants: Vec<protocol::ClientParticipant> = Vec::new();
 
+                // TODO: this in parallel, with try_join!
                 for account_init in create_participants_message.iter() {
                     use std::iter;
                     use rand::{SeedableRng, rngs::StdRng, Rng};
@@ -643,68 +436,38 @@ async fn client_message(
                         .map(char::from)
                         .take(24)
                         .collect();
-                    let name = common::FspId::from(format!("voodoo{}", name_suffix).as_str()).unwrap();
+                    let name = FspId::from(format!("voodoo{}", name_suffix).as_str()).unwrap();
 
-                    let new_participant_req =
-                        reqwest::Request::try_from(
-                            to_request(
-                                participants::PostParticipant {
-                                    participant: participants::NewParticipant {
-                                        currency: account_init.currency,
-                                        name,
-                                    },
-                                },
-                                "http://centralledger-service",
-                            ).map_err(|_| VoodooError::InvalidUrl)?
-                        ).map_err(|_| VoodooError::RequestConversionError)?;
-                    let new_participant = http_client.execute(new_participant_req).await
-                        .map_err(|e| VoodooError::HttpError("creating participant", e.to_string()))?
-                        .json::<MlApiResponse<participants::Participant>>().await
-                        .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
-
-                    match new_participant {
-                        MlApiResponse::Err(ml_err) => {
-                            println!("Whoopsie. TODO: let client know there was a problem creating the new participant. The problem: {:?}", ml_err);
+                    let new_participant_req = participants::PostParticipant {
+                        participant: participants::NewParticipant {
+                            currency: account_init.currency,
+                            name,
                         },
-                        MlApiResponse::Response(new_participant) => {
-                            let participant_init_req =
-                                reqwest::Request::try_from(
-                                    to_request(
-                                        participants::PostInitialPositionAndLimits {
-                                            initial_position_and_limits: participants::InitialPositionAndLimits {
-                                                currency: account_init.currency,
-                                                limit: participants::Limit {
-                                                    r#type: participants::LimitType::NetDebitCap,
-                                                    value: account_init.ndc,
-                                                },
-                                                initial_position: account_init.initial_position,
-                                            },
-                                            name,
-                                        },
-                                        "http://centralledger-service",
-                                    ).map_err(|_| VoodooError::InvalidUrl)?
-                                ).map_err(|_| VoodooError::RequestConversionError)?;
-                            http_client.execute(participant_init_req).await
-                                .map_err(|e| VoodooError::HttpError("initialising participant account", e.to_string()))?;
+                    };
+                    let new_participant = moja_clients.central_ledger.send(new_participant_req).await?.des().await?;
+                    let participant_init_req = participants::PostInitialPositionAndLimits {
+                        initial_position_and_limits: participants::InitialPositionAndLimits {
+                            currency: account_init.currency,
+                            limit: participants::Limit {
+                                r#type: participants::LimitType::NetDebitCap,
+                                value: account_init.ndc,
+                            },
+                            initial_position: account_init.initial_position,
+                        },
+                        name,
+                    };
+                    moja_clients.central_ledger.send(participant_init_req).await?;
 
-                            println!("Created participant {} for client", name);
-                            // TODO: Need to disable these participants when we're done with them
-                            client_data.participants.push(new_participant.name.clone());
-                            new_participants.push(protocol::ClientParticipant {
-                                name: new_participant.name,
-                                account: *account_init,
-                            });
-                        }
-                    }
+                    println!("Created participant {} for client", name);
+                    // TODO: Need to disable these participants when we're done with them
+                    client_data.participants.push(new_participant.name.clone());
+                    new_participants.push(protocol::ClientParticipant {
+                        name: new_participant.name,
+                        account: *account_init,
+                    });
                 }
 
-                let msg_text = serde_json::to_string(
-                    &protocol::ServerMessage::AssignParticipants(new_participants)
-                ).unwrap();
-                if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(msg_text))) {
-                    // Disconnect handled elsewhere
-                    println!("Client disconnected, failed to send");
-                }
+                client_data.send(&protocol::ServerMessage::AssignParticipants(new_participants));
             } else {
                 // TODO: we should return something to the client indicating an error
                 println!("No client data found for connection!");
@@ -724,45 +487,30 @@ async fn client_message(
                     println!("Overriding endpoints for {}", participant);
                     use strum::IntoEnumIterator;
                     for callback_type in participants::FspiopCallbackType::iter() {
-                        let request = to_request(
-                            participants::PostCallbackUrl {
-                                name: **participant,
-                                callback_type,
-                                // TODO: strip trailing slash
-                                hostname: my_address.clone(),
-                            },
-                            // TODO: more robust mechanism for finding the "central ledger service" service
-                            "http://centralledger-service",
-                        ).map_err(|_| VoodooError::InvalidUrl)?;
-                        let request = reqwest::Request::try_from(request)
-                            .map_err(|_| VoodooError::RequestConversionError)?;
-                        http_client.execute(request).await
-                            .map_err(|e| VoodooError::HttpError("setting participant endpoint", e.to_string()))?;
+                        let request = participants::PostCallbackUrl {
+                            name: **participant,
+                            callback_type,
+                            // TODO: strip trailing slash
+                            hostname: my_address.clone(),
+                        };
+                        moja_clients.central_ledger.send(request).await?;
                         println!("Updated {:?} endpoint to {}.", callback_type, my_address.clone());
                     }
                 }
 
                 // Send the transfer prepare, we'll receive it on our POST /transfers soon enough..
-                let req_post_transfer = to_http_request(
-                    build_transfer_prepare(
+                let req_post_transfer = transfer::TransferPrepareRequest::new(
                         transfer.msg_sender.clone(),
                         transfer.msg_recipient.clone(),
                         transfer.amount,
                         transfer.currency,
                         Some(transfer.transfer_id),
-                    ),
-                    // TODO: more robust mechanism for finding the "ml api adapter service" service
-                    "http://ml-api-adapter-service",
-                ).map_err(|_| VoodooError::InvalidUrl)?;
-                println!("Sending POST /transfer {:?}", req_post_transfer);
-                let request = reqwest::Request::try_from(req_post_transfer)
-                    .map_err(|_| VoodooError::RequestConversionError)?;
-                http_client.execute(request).await
-                    .map_err(|e| VoodooError::HttpError("sending transfer prepare", e.to_string()))?;
+                );
+                moja_clients.transfer.send(req_post_transfer).await?;
 
                 println!("Storing in-flight message {}", transfer.transfer_id);
                 in_flight_msgs.write().await.insert(
-                    FspiopMessageId::TransferId(transfer.transfer_id),
+                    control_plane::FspiopMessageId::TransferId(transfer.transfer_id),
                     client_id
                 );
 
@@ -787,52 +535,39 @@ async fn client_message(
             if let Some(client_data) = clients.write().await.get_mut(&client_id) {
                 use mojaloop_api::central_ledger::settlement_models;
 
-                let success_response_text = serde_json::to_string(
-                    &protocol::ServerMessage::SettlementModelCreated(
+                let success_response =
+                    protocol::ServerMessage::SettlementModelCreated(
                         protocol::SettlementModelCreatedMessage {
                             settlement_model: settlement_model.clone()
                         }
-                    )).unwrap();
+                    );
 
-                let settlement_model_create_req = reqwest::Request::try_from(
-                    to_request(
-                        settlement_models::PostSettlementModel {
-                            settlement_model
-                        },
-                        "http://centralledger-service",
-                    ).map_err(|_| VoodooError::InvalidUrl)?
-                ).map_err(|_| VoodooError::RequestConversionError)?;
+                let settlement_model_create_req = settlement_models::PostSettlementModel {
+                    settlement_model
+                };
 
-                let result = http_client.execute(settlement_model_create_req).await
-                    .map_err(|e| VoodooError::HttpError("creating settlement model", e.to_string()))?;
-
-                if result.status() == 201 {
-                    if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(success_response_text))) {
-                        // Disconnect handled elsewhere
-                        println!("Client disconnected, failed to send");
-                    }
-                } else {
-                    let result = result
-                        .json::<fspiox_api::common::ErrorResponse>().await
-                        .map_err(|e| VoodooError::ResponseConversionError(e.to_string()))?;
-                    lazy_static! {
-                        static ref RE: Regex = Regex::new(r".*Settlement model.*already exists.*").unwrap();
-                    }
-                    if result.error_information.error_code == common::MojaloopApiError::InternalServerError &&
-                        RE.is_match(&result.error_information.error_description) {
-                        // TODO: this is actually an error that the client should be
-                        // informed of. The switch has simply said "there has been a name
-                        // clash- you asked for a settlement model name that already
-                        // existed". At the time of writing, ignoring this case is
-                        // desirable, however this is certainly not the general case, and
-                        // this should be handled, and an error returned to the client.
-                        if let Err(_disconnected) = client_data.chan.send(Ok(Message::text(success_response_text))) {
-                            // Disconnect handled elsewhere
-                            println!("Client disconnected, failed to send");
+                match moja_clients.central_ledger.send(settlement_model_create_req).await {
+                    Ok(_) => {
+                        client_data.send(&success_response);
+                    },
+                    Err(fspiox_api::clients::Error::MojaloopApiError(ml_err)) => {
+                        lazy_static! {
+                            static ref RE: Regex = Regex::new(r".*Settlement model.*already exists.*").unwrap();
                         }
-                    } else {
-                        println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", result);
-                    }
+                        if ml_err.error_information.error_code == fspiox_api::MojaloopApiError::InternalServerError &&
+                            RE.is_match(&ml_err.error_information.error_description) {
+                            // TODO: this is actually an error that the client should be
+                            // informed of. The switch has simply said "there has been a name
+                            // clash- you asked for a settlement model name that already
+                            // existed". At the time of writing, ignoring this case is
+                            // desirable, however this is certainly not the general case, and
+                            // this should be handled, and an error returned to the client.
+                            client_data.send(&success_response);
+                        } else {
+                            println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", ml_err);
+                        }
+                    },
+                    x => handle_failed_match(x),
                 }
             } else {
                 // TODO: we should return something to the client indicating an error
