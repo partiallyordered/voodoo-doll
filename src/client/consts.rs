@@ -50,33 +50,14 @@ lazy_static! {
           },
           "rules": [
             {
-              "apiGroups": [
-                ""
-              ],
-              "resources": [
-                "pods"
-              ],
-              "verbs": [
-                "get",
-                "watch",
-                "list"
-              ]
+              "apiGroups": [ "" ],
+              "resources": [ "pods" ],
+              "verbs": [ "get", "watch", "list" ]
             },
             {
-              "apiGroups": [
-                ""
-              ],
-              "resources": [
-                "pods/portforward"
-              ],
-              "verbs": [
-                "create",
-                "update",
-                "delete",
-                "watch",
-                "get",
-                "list"
-              ]
+              "apiGroups": [ "" ],
+              "resources": [ "pods/portforward" ],
+              "verbs": [ "create", "update", "delete", "watch", "get", "list" ]
             }
           ]
         }
