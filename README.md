@@ -2,6 +2,7 @@
 An in-cluster Mojaloop participant simulator intended for temporary deployment by mojo
 
 ## Build
+Also generates Kubernetes manifests in the `kubernetes` directory.
 ```sh
 cargo b --all-features
 ```
