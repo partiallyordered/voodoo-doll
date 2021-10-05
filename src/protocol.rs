@@ -133,6 +133,7 @@ export! {
     settlement_models::SettlementInterchange,
     settlement_models::LedgerAccountType,
     settlement_models::SettlementModel,
+    settlement_models::SettlementModelName,
     settlement::GetSettlements,
     settlement::NewSettlement,
     settlement::SettlementSettlementWindow,
