@@ -13,6 +13,10 @@ cargo t --features=typescript_types
 ```
 
 ### TODO
+- How to handle multiple k8s API versions?
+- Is it possible to detect the k8s API version?
+- k8s-openapi should be a sibling dependency. How do other libs do this?
+- Basic deployment smoke test of the k8s manifests
 - Change pod to deployment, easier to change version, especially with Skaffold
 - Document client features, and required features
 - Extend clients to support
