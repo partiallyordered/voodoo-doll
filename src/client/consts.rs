@@ -6,7 +6,9 @@ pub const LABEL_VALUE: &'static str = "voodoo-doll";
 pub const CONTAINER_NAME: &'static str = "app";
 pub const CONTAINER_PORT: i32 = 3030;
 pub const POD_NAME: &'static str = "voodoo-doll";
-pub const BINDING_NAME: &'static str = "voodoo-doll-pod-access";
+pub const ROLE_NAME: &'static str = "voodoo-doll-pod-access";
+pub const ROLEBINDING_NAME: &'static str = ROLE_NAME;
+pub const SERVICEACCOUNT_NAME: &'static str = POD_NAME;
 
 lazy_static! {
     pub static ref SERVICEACCOUNT_JSON: serde_json::Value = json!(
@@ -14,7 +16,7 @@ lazy_static! {
           "apiVersion": "v1",
           "kind": "ServiceAccount",
           "metadata": {
-            "name": POD_NAME
+            "name": SERVICEACCOUNT_NAME
           }
         }
     );
@@ -24,7 +26,7 @@ lazy_static! {
           "apiVersion": "rbac.authorization.k8s.io/v1",
           "kind": "ClusterRoleBinding",
           "metadata": {
-            "name": BINDING_NAME
+            "name": ROLEBINDING_NAME
           },
           "subjects": [
             {
@@ -35,7 +37,7 @@ lazy_static! {
           ],
           "roleRef": {
             "kind": "ClusterRole",
-            "name": BINDING_NAME,
+            "name": ROLEBINDING_NAME,
             "apiGroup": "rbac.authorization.k8s.io"
           }
         }
@@ -46,7 +48,7 @@ lazy_static! {
           "apiVersion": "rbac.authorization.k8s.io/v1",
           "kind": "ClusterRole",
           "metadata": {
-            "name": BINDING_NAME
+            "name": ROLE_NAME
           },
           "rules": [
             {
