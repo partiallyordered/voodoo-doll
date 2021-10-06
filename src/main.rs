@@ -100,12 +100,10 @@ async fn main() {
     use mojaloop_api::clients::FspiopClient;
     let clients = control_plane::Clients::default();
     let in_flight_msgs = control_plane::InFlightFspiopMessages::default();
-
-    // TODO: attempt to detect whether we're running in k8s and make a loud error if we're not.
-    // In fact, we're not going to achieve anything if we can't infer the kubeconfig from the
-    // environment, so we should try to do that, and if we fail we'll die.
-    // In fact, this will manifest as a mojaloop_api::clients::k8s::Error::UnableToLoadKubeconfig
-    // error. We could also just call Client::try_default() or something?
+    let k8s_client = match kube::Client::try_default().await {
+        Ok(cli) => cli,
+        Err(e) => panic!("Couldn't infer k8s config from environment: {}", e),
+    };
 
     // GET /voodoo -> websocket upgrade
     let voodoo = warp::path("voodoo")
@@ -113,8 +111,9 @@ async fn main() {
         // TODO: is there a tidier way to do this?
         .and(warp::any().map({ let clients = clients.clone(); move || clients.clone()}))
         .and(warp::any().map({ let in_flight_msgs = in_flight_msgs.clone(); move || in_flight_msgs.clone() }))
-        .map(|ws: warp::ws::Ws, clients, in_flight_msgs| {
-            ws.on_upgrade(move |socket| ws_connection_handler(socket, clients, in_flight_msgs))
+        .and(warp::any().map({ let k8s_client = k8s_client.clone(); move || k8s_client.clone() }))
+        .map(|ws: warp::ws::Ws, clients, in_flight_msgs, k8s_client| {
+            ws.on_upgrade(move |socket| ws_connection_handler(socket, clients, in_flight_msgs, k8s_client))
         });
 
     // PUT /transfers
@@ -177,7 +176,8 @@ async fn main() {
 async fn ws_connection_handler(
     ws: ws::WebSocket,
     clients: control_plane::Clients,
-    in_flight_msgs: control_plane::InFlightFspiopMessages
+    in_flight_msgs: control_plane::InFlightFspiopMessages,
+    k8s_client: kube::Client,
 ) {
     let client_id = CLIENT_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
 
@@ -193,7 +193,10 @@ async fn ws_connection_handler(
         }
     }));
 
-    let mut moja_clients = match mojaloop_api::clients::k8s::get_all_from_k8s(&None, &None, None).await {
+    // TODO: what is the default namespace? If we're running inside a cluster and we use defaults,
+    // will the default namespace be "default" (or whatever is set as the default cluster
+    // namespace), or will it be the namespace we're running in?
+    let mut moja_clients = match mojaloop_api::clients::k8s::get_all_from_k8s(Some(k8s_client), &None).await {
         Err(e) => {
             panic!("Couldn't connect to switch for websocket client: {}", e);
         },

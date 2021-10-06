@@ -1,2 +1,5 @@
 resources:
+- serviceaccount.json
+- clusterrole.json
+- clusterrolebinding.json
 - pod.json
