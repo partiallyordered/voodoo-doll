@@ -1,6 +1,6 @@
 [package]
 name = "voodoo-doll"
-version = "0.10.1"
+version = "0.10.2"
 authors = ["msk- <mattkingston@gmail.com>"]
 edition = "2018"
 
