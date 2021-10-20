@@ -1,3 +1,4 @@
+import { strict as assert } from 'assert';
 import * as protocol from './lib/protocol';
 import WebSocket from 'ws';
 import * as url from 'url';
@@ -49,7 +50,7 @@ export class VoodooClient extends WebSocket {
                     // we're interested in, but when we receive a message of the type we _are_
                     // interested in, we want to be sure we've handled it and emitted it to our
                     // listeners as a correctly typed event.
-                    const exhaustiveCheck: never = m;
+                    const exhaustiveCheck: never = m.content;
                     throw new Error(`Unhandled message type: ${exhaustiveCheck}`);
                 }
             }
@@ -64,7 +65,7 @@ export class VoodooClient extends WebSocket {
     exchange(
         sendMsg: protocol.Request,
         timeoutMs: number = this.defaultTimeout,
-    ): PromiseLike<protocol.Notification['value']> {
+    ): PromiseLike<protocol.ServerMessage> {
         return new Promise((resolve, reject) => {
             const id = uuidv4();
             trace(`Beginning ${sendMsg.type} request: ${id}. Timeout after ${timeoutMs}ms.`);
@@ -160,70 +161,89 @@ export class VoodooClient extends WebSocket {
         });
     }
 
-    createSettlementModel(
+    async createSettlementModel(
         model: protocol.SettlementModel,
         timeoutMs: number = this.defaultTimeout,
     ) {
-        TODO: match the return type and resolve or reject accordingly. And for the other methods.
-        return this.exchange(
+        const response = await this.exchange(
             {
                 type: "CreateSettlementModel",
                 value: model,
             },
             timeoutMs,
         );
+        if (response.content.type === 'SettlementModelCreated') {
+            return Promise.reject(response.content);
+        }
+        return response.content.value;
     }
 
-    getSettlementWindows(
+    async getSettlementWindows(
         params: protocol.GetSettlementWindows,
         timeoutMs: number = this.defaultTimeout,
     ) {
-        return this.exchange(
+        const response = await this.exchange(
             {
                 type: "GetSettlementWindows",
                 value: params,
             },
             timeoutMs,
         );
+        if (response.content.type === 'SettlementWindows') {
+            return Promise.reject(response.content);
+        }
+        return response.content.value;
     }
 
-    closeSettlementWindow(
+    async closeSettlementWindow(
         payload: protocol.SettlementWindowCloseMessage,
         timeoutMs: number = this.defaultTimeout,
     ) {
-        return this.exchange(
+        const response = await this.exchange(
             {
                 type: "CloseSettlementWindow",
                 value: payload,
             },
             timeoutMs,
         );
+        if (response.content.type === 'SettlementWindowClosed') {
+            return Promise.reject(response.content);
+        }
+        return response.content.value;
     }
 
-    getSettlements(
+    async getSettlements(
         payload: protocol.GetSettlements,
         timeoutMs: number = this.defaultTimeout,
     ) {
-        return this.exchange(
+        const response = await this.exchange(
             {
                 type: "GetSettlements",
                 value: payload,
             },
             timeoutMs,
         );
+        if (response.content.type === 'SettlementWindows') {
+            return Promise.reject(response.content);
+        }
+        return response.content.value;
     }
 
-    createSettlement(
+    async createSettlement(
         payload: protocol.NewSettlement,
         timeoutMs: number = this.defaultTimeout,
     ) {
-        return this.exchange(
+        const response = await this.exchange(
             {
                 type: "CreateSettlement",
                 value: payload,
             },
             timeoutMs,
         );
+        if (response.content.type === 'NewSettlementCreated') {
+            return Promise.reject(response.content);
+        }
+        return response.content.value;
     }
 }
 

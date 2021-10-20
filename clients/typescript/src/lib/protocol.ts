@@ -491,7 +491,10 @@ export type Notification =
   | { type: "HubAccountsCreated"; value: HubAccount[] }
   | { type: "SettlementModelCreated"; value: SettlementModelCreatedMessage }
   | { type: "SettlementWindowClosed"; value: SettlementWindowId }
-  | { type: "SettlementWindowCloseFailed"; value: SettlementWindowCloseFailedMessage }
+  | {
+    type: "SettlementWindowCloseFailed";
+    value: SettlementWindowCloseFailedMessage;
+  }
   | { type: "SettlementWindows"; value: SettlementWindow[] }
   | { type: "Settlements"; value: Settlement[] }
   | { type: "NewSettlementCreated"; value: Settlement };
