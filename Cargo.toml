@@ -1,6 +1,6 @@
 [package]
 name = "voodoo-doll"
-version = "0.11.0"
+version = "0.11.1"
 authors = ["msk- <mattkingston@gmail.com>"]
 edition = "2018"
 
@@ -15,11 +15,11 @@ tokio-stream = { version = "0.1.6" }
 hyper = "0.14"
 warp = "0.3"
 futures = "0.3"
-fspiox-api = { git = "https://github.com/partiallyordered/fspiox-api", rev = "a413f109eec15d41ca2dc59ee962aad56c75c4d2", features = ["fsp_http", "typescript_types"] }
+fspiox-api = { git = "https://github.com/partiallyordered/fspiox-api", rev = "b4a328a89c06a23c39bd96a6f3ccc41bdf4f0d83", features = ["fsp_http", "typescript_types"] }
 # fspiox-api = { path = "/home/msk/projects/github.com/msk-/fspiox-api/", features = ["fsp_http", "typescript_types"] }
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
-mojaloop-api = { git = "https://github.com/partiallyordered/mojaloop-api", rev = "947d0a3804c47a315c0cc73b581342d646a0e7c3", features = ["typescript_types", "clients-kube"] }
+mojaloop-api = { git = "https://github.com/partiallyordered/mojaloop-api", rev = "4978aded22dc9f2ce05093ba28555da67d328199", features = ["typescript_types", "clients-kube"] }
 # mojaloop-api = { path = "/home/msk/projects/github.com/msk-/mojaloop-api/", features = ["typescript_types", "clients-kube"] }
 thiserror = "1.0"
 strum = "0.21"
