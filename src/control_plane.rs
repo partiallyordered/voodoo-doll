@@ -12,8 +12,9 @@ pub(crate) struct ClientData {
 }
 
 impl ClientData {
-    pub fn send(&self, msg: &protocol::ServerMessage) {
-        let msg_text = serde_json::to_string(msg).unwrap();
+    pub fn send(&self, id: Option<protocol::Id>, content: protocol::Notification) {
+        let msg = protocol::ServerMessage { id, content };
+        let msg_text = serde_json::to_string(&msg).unwrap();
         println!("Sending message to client: {}", msg_text);
         if let Err(e) = self.chan.send(Ok(Message::text(msg_text))) {
             // The actual disconnect will be handled elsewhere
@@ -32,7 +33,7 @@ pub(crate) enum FspiopMessageId {
 
 /// FSPIOP messages that we've sent that we're expecting a callback for, mapped to the client that
 /// requested them.
-pub(crate) type InFlightFspiopMessages = Arc<RwLock<HashMap<FspiopMessageId, ClientId>>>;
+pub(crate) type InFlightFspiopMessages = Arc<RwLock<HashMap<FspiopMessageId, (ClientId, protocol::Id)>>>;
 
 // TODO: implement this properly to return an actual FSPIOP error. Or perhaps add warp-specific
 // return value implementations to the fspiox-api FspiopError.

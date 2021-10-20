@@ -12,15 +12,17 @@ pub(crate) async fn handle_put_transfers(
 ) -> std::result::Result<impl warp::Reply, std::convert::Infallible> {
     match in_flight_msgs.read().await.get(&control_plane::FspiopMessageId::TransferId(transfer_id)) {
         // TODO: assert that the transfer ID in the URI matches the transfer ID in the payload?
-        Some(client_id) => {
+        Some((client_id, msg_id)) => {
             println!("Transfer fulfil received | {:?}", transfer_fulfil);
             if let Some(client_data) = clients.write().await.get_mut(client_id) {
-                let msg = &protocol::ServerMessage::TransferComplete(
-                    protocol::TransferCompleteMessage {
-                        id: transfer_id,
-                    }
+                client_data.send(
+                    Some(*msg_id),
+                    protocol::Notification::TransferComplete(
+                        protocol::TransferCompleteMessage {
+                            id: transfer_id,
+                        }
+                    )
                 );
-                client_data.send(&msg);
             } else {
                 println!("No client found for transfer");
             }
@@ -38,16 +40,18 @@ pub(crate) async fn handle_put_transfers_error(
 ) -> std::result::Result<impl warp::Reply, std::convert::Infallible> {
     match in_flight_msgs.read().await.get(&control_plane::FspiopMessageId::TransferId(transfer_id)) {
         // TODO: assert that the transfer ID in the URI matches the transfer ID in the payload?
-        Some(client_id) => {
+        Some((client_id, msg_id)) => {
             println!("Transfer error received {} | {:?}", transfer_id, transfer_error);
             if let Some(client_data) = clients.write().await.get_mut(client_id) {
-                let msg = protocol::ServerMessage::TransferError(
-                    protocol::TransferErrorMessage {
-                        id: transfer_id,
-                        response: transfer_error,
-                    }
+                client_data.send(
+                    Some(*msg_id),
+                    protocol::Notification::TransferError(
+                        protocol::TransferErrorMessage {
+                            id: transfer_id,
+                            response: transfer_error,
+                        }
+                    )
                 );
-                client_data.send(&msg);
             } else {
                 println!("No client found for transfer");
             }
@@ -63,8 +67,27 @@ pub(crate) async fn handle_put_transfers_error(
 pub(crate) async fn handle_post_transfers(
     transfer_prepare: transfer::TransferPrepareRequestBody,
     transfer_client: Arc<Mutex<mojaloop_api::clients::transfer::Client>>,
+    in_flight_msgs: control_plane::InFlightFspiopMessages,
+    clients: control_plane::Clients,
 ) -> std::result::Result<impl warp::Reply, std::convert::Infallible> {
     println!("Received POST /transfer {:?}", transfer_prepare);
+    // TODO: we need to identify whether one of our clients owns the participant for which this
+    // transfer prepare is intended. If so, we should send a corresponding notification to this
+    // client.
+    match in_flight_msgs.read().await.get(&control_plane::FspiopMessageId::TransferId(transfer_prepare.transfer_id)) {
+        // TODO: assert that the transfer ID in the URI matches the transfer ID in the payload?
+        Some((client_id, msg_id)) => {
+            if let Some(client_data) = clients.write().await.get_mut(client_id) {
+                client_data.send(
+                    Some(*msg_id),
+                    protocol::Notification::TransferPrepare(transfer_prepare),
+                );
+            } else {
+                println!("No client found for transfer");
+            }
+        }
+        None => println!("Received FSPIOP transfer prepare message not initiated by us")
+    }
     let req_put_transfer = transfer::TransferFulfilRequest::new(
         transfer_prepare.payer_fsp,
         transfer_prepare.payee_fsp,

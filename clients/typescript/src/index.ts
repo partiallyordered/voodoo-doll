@@ -1,6 +1,8 @@
+import { strict as assert } from 'assert';
 import * as protocol from './lib/protocol';
 import WebSocket from 'ws';
 import * as url from 'url';
+import { v4 as uuidv4 } from 'uuid';
 
 const trace = (..._args: any[]) => ({}); // console.log(..._args);
 
@@ -26,18 +28,20 @@ export class VoodooClient extends WebSocket {
             trace(`Received message: ${message}`);
             const m = JSON.parse(message.toString()) as protocol.ServerMessage;
             trace(`Message as string: ${m}`);
-            switch (m.type) {
-                case 'AssignParticipants':
-                case 'HubAccountsCreated':
+            switch (m.content.type) {
+                case 'TransferPrepare':
                 case 'TransferComplete':
                 case 'TransferError':
+                case 'AssignParticipants':
+                case 'HubAccountsCreated':
                 case 'SettlementModelCreated':
                 case 'SettlementWindowClosed':
                 case 'SettlementWindowCloseFailed':
                 case 'SettlementWindows':
                 case 'Settlements':
                 case 'NewSettlementCreated':
-                    this.emit(m.type, m.value);
+                    this.emit(m.content.type, m);
+                    this.emit(m.id, m);
                     break;
                 default: {
                     // Did you get a compile error here? This code is written such that if every
@@ -46,7 +50,7 @@ export class VoodooClient extends WebSocket {
                     // we're interested in, but when we receive a message of the type we _are_
                     // interested in, we want to be sure we've handled it and emitted it to our
                     // listeners as a correctly typed event.
-                    const exhaustiveCheck: never = m;
+                    const exhaustiveCheck: never = m.content;
                     throw new Error(`Unhandled message type: ${exhaustiveCheck}`);
                 }
             }
@@ -58,27 +62,29 @@ export class VoodooClient extends WebSocket {
     }
 
     // Exchange a single request-response pair with the server
-    exchange<ServerResponse extends protocol.ServerMessage['value']>(
-        sendMsg: protocol.ClientMessage,
-        recvMsgDiscriminator: protocol.ServerMessage['type'],
+    exchange(
+        sendMsg: protocol.Request,
         timeoutMs: number = this.defaultTimeout,
-    ): PromiseLike<ServerResponse> {
+    ): PromiseLike<protocol.ServerMessage> {
         return new Promise((resolve, reject) => {
-            const exchangeType = `${sendMsg.type}-${recvMsgDiscriminator}`;
-            trace(`Beginning ${exchangeType} exchange. Timeout after ${timeoutMs}ms.`);
+            const id = uuidv4();
+            trace(`Beginning ${sendMsg.type} request: ${id}. Timeout after ${timeoutMs}ms.`);
             const t = setTimeout(
-                () => reject(new Error(`${exchangeType} exchange timed out after ${timeoutMs}ms`)),
+                () => reject(new Error(`Request ${id} timed out after ${timeoutMs}ms`)),
                 timeoutMs
             );
 
-            this.once(recvMsgDiscriminator, (m: ServerResponse) => {
-                trace(`Received ${recvMsgDiscriminator} message for ${exchangeType} exchange`);
+            this.once(id, (m: protocol.ServerMessage) => {
+                trace(`Received notification for request id ${id}`);
                 clearTimeout(t);
                 resolve(m);
             });
 
-            trace(`Sending ${sendMsg.type} message for ${exchangeType} exchange`);
-            this.send(sendMsg);
+            trace(`Sending request: ${sendMsg}`);
+            this.send({
+                id,
+                content: sendMsg,
+            });
         });
     }
 
@@ -98,12 +104,11 @@ export class VoodooClient extends WebSocket {
         participants: protocol.AccountInitialization[],
         timeoutMs: number = this.defaultTimeout,
     ) {
-        return this.exchange<protocol.ClientParticipant[]>(
+        return this.exchange(
             {
                 type: "CreateParticipants",
                 value: participants,
             },
-            "AssignParticipants",
             timeoutMs,
         );
     }
@@ -112,12 +117,11 @@ export class VoodooClient extends WebSocket {
         accounts: protocol.HubAccount[],
         timeoutMs: number = this.defaultTimeout,
     ) {
-        return this.exchange<protocol.HubAccount[]>(
+        return this.exchange(
             {
                 type: "CreateHubAccounts",
                 value: accounts,
             },
-            "HubAccountsCreated",
             timeoutMs,
         );
     }
@@ -126,84 +130,120 @@ export class VoodooClient extends WebSocket {
         transfers: protocol.TransferMessage[],
         timeoutMs: number = this.defaultTimeout,
     ) {
-        return this.exchange<protocol.TransferCompleteMessage>(
-            {
-                type: "Transfers",
-                value: transfers,
-            },
-            "TransferComplete",
-            timeoutMs,
-        );
+        const sendMsg: protocol.Request = {
+            type: 'Transfers',
+            value: transfers,
+        };
+        return new Promise((resolve, reject) => {
+            const id = uuidv4();
+            trace(`Beginning ${sendMsg.type} request: ${id}. Timeout after ${timeoutMs}ms.`);
+            const t = setTimeout(
+                () => reject(new Error(`Request ${id} timed out after ${timeoutMs}ms`)),
+                timeoutMs
+            );
+
+            const listener = (m: protocol.ServerMessage) => {
+                if (m.content.type !== 'TransferPrepare') {
+                    trace(`Received notification for request id ${id}`);
+                    clearTimeout(t);
+                    resolve(m);
+                    this.off(id, listener);
+                }
+            };
+
+            this.on(id, listener);
+
+            trace(`Sending request: ${sendMsg}`);
+            this.send({
+                id,
+                content: sendMsg,
+            });
+        });
     }
 
-    createSettlementModel(
+    async createSettlementModel(
         model: protocol.SettlementModel,
         timeoutMs: number = this.defaultTimeout,
     ) {
-        return this.exchange<protocol.SettlementModelCreatedMessage>(
+        const response = await this.exchange(
             {
                 type: "CreateSettlementModel",
                 value: model,
             },
-            "SettlementModelCreated",
             timeoutMs,
         );
+        if (response.content.type === 'SettlementModelCreated') {
+            return Promise.reject(response.content);
+        }
+        return response.content.value;
     }
 
-    getSettlementWindows(
+    async getSettlementWindows(
         params: protocol.GetSettlementWindows,
         timeoutMs: number = this.defaultTimeout,
     ) {
-        return this.exchange<protocol.SettlementWindow[]>(
+        const response = await this.exchange(
             {
                 type: "GetSettlementWindows",
                 value: params,
             },
-            "SettlementWindows",
             timeoutMs,
         );
+        if (response.content.type === 'SettlementWindows') {
+            return Promise.reject(response.content);
+        }
+        return response.content.value;
     }
 
-    closeSettlementWindow(
+    async closeSettlementWindow(
         payload: protocol.SettlementWindowCloseMessage,
         timeoutMs: number = this.defaultTimeout,
     ) {
-        return this.exchange<protocol.SettlementWindowId>(
+        const response = await this.exchange(
             {
                 type: "CloseSettlementWindow",
                 value: payload,
             },
-            "SettlementWindowClosed",
             timeoutMs,
         );
+        if (response.content.type === 'SettlementWindowClosed') {
+            return Promise.reject(response.content);
+        }
+        return response.content.value;
     }
 
-    getSettlements(
+    async getSettlements(
         payload: protocol.GetSettlements,
         timeoutMs: number = this.defaultTimeout,
     ) {
-        return this.exchange<protocol.Settlement[]>(
+        const response = await this.exchange(
             {
                 type: "GetSettlements",
                 value: payload,
             },
-            "Settlements",
             timeoutMs,
         );
+        if (response.content.type === 'SettlementWindows') {
+            return Promise.reject(response.content);
+        }
+        return response.content.value;
     }
 
-    createSettlement(
+    async createSettlement(
         payload: protocol.NewSettlement,
         timeoutMs: number = this.defaultTimeout,
     ) {
-        return this.exchange<protocol.Settlement>(
+        const response = await this.exchange(
             {
                 type: "CreateSettlement",
                 value: payload,
             },
-            "NewSettlementCreated",
             timeoutMs,
         );
+        if (response.content.type === 'NewSettlementCreated') {
+            return Promise.reject(response.content);
+        }
+        return response.content.value;
     }
 }
 

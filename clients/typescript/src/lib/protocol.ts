@@ -184,6 +184,27 @@ export type HubAccountType =
   | "HUB_MULTILATERAL_SETTLEMENT"
   | "HUB_RECONCILIATION";
 
+export interface TransferPrepareRequestBody {
+  transferId: string;
+  payeeFsp: FspId;
+  payerFsp: FspId;
+  amount: Money;
+  ilpPacket: IlpPacket;
+  condition: IlpCondition;
+  expiration: DateTime;
+}
+
+export type IlpPacket = string;
+
+export type IlpCondition = string;
+
+export type CorrelationId = string;
+
+export interface Money {
+  currency: Currency;
+  amount: Amount;
+}
+
 export type FspId = string;
 
 export type DateTime = string;
@@ -452,7 +473,18 @@ export type MojaloopApiError =
   | "5300"
   | "5400";
 
-export type ServerMessage =
+export type Request =
+  | { type: "Transfers"; value: TransferMessage[] }
+  | { type: "CreateHubAccounts"; value: HubAccount[] }
+  | { type: "CreateParticipants"; value: AccountInitialization[] }
+  | { type: "CreateSettlementModel"; value: SettlementModel }
+  | { type: "CloseSettlementWindow"; value: SettlementWindowCloseMessage }
+  | { type: "GetSettlementWindows"; value: GetSettlementWindows }
+  | { type: "GetSettlements"; value: GetSettlements }
+  | { type: "CreateSettlement"; value: NewSettlement };
+
+export type Notification =
+  | { type: "TransferPrepare"; value: TransferPrepareRequestBody }
   | { type: "TransferComplete"; value: TransferCompleteMessage }
   | { type: "TransferError"; value: TransferErrorMessage }
   | { type: "AssignParticipants"; value: ClientParticipant[] }
@@ -467,12 +499,12 @@ export type ServerMessage =
   | { type: "Settlements"; value: Settlement[] }
   | { type: "NewSettlementCreated"; value: Settlement };
 
-export type ClientMessage =
-  | { type: "Transfers"; value: TransferMessage[] }
-  | { type: "CreateHubAccounts"; value: HubAccount[] }
-  | { type: "CreateParticipants"; value: AccountInitialization[] }
-  | { type: "CreateSettlementModel"; value: SettlementModel }
-  | { type: "CloseSettlementWindow"; value: SettlementWindowCloseMessage }
-  | { type: "GetSettlementWindows"; value: GetSettlementWindows }
-  | { type: "GetSettlements"; value: GetSettlements }
-  | { type: "CreateSettlement"; value: NewSettlement };
+export interface ServerMessage {
+  id: CorrelationId | null;
+  content: Notification;
+}
+
+export interface ClientMessage {
+  id: CorrelationId;
+  content: Request;
+}

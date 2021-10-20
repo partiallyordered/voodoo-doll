@@ -12,6 +12,23 @@ cargo b --all-features
 cargo t --features=typescript_types
 ```
 
+## RPC
+- Decided against gRPC at the time of writing, because the type system is far less rich than
+    Rust's, and there would have been a not-insignificant development cost to use gRPC, to achieve
+    an outcome that would not have been improved by this metric. This doesn't preclude the
+    possibility of a gRPC interface either additionally or instead of the existing interface in
+    future.
+- Decided against Cap'n Proto at the time of writing because of much weaker client support. No
+    effort was made toward an implementation so I don't know about the fidelity of the type system,
+    for example. Cap'n Proto has at least one feature that looks very attractive, however,
+    especially for a project such as this one: promise pipelining. This could be worth further
+    investigation.
+- It might be worth considering Rust-specific RPC also, e.g. https://github.com/google/tarpc, which
+    appears to have some advantages, such as eliding serialization, which could make certain
+    use-cases faster.
+    - I wonder how easy it would be to generate client libraries for other languages, perhaps just
+        leveraging C linkage.
+
 ### TODO
 - How to handle multiple k8s API versions?
 - Is it possible to detect the k8s API version?

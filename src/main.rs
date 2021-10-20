@@ -144,8 +144,10 @@ async fn main() {
         // });
         .and(warp::any().map({ let client = transfer_client.clone(); move || client.clone()}))
         .and_then({
+            let clients = clients.clone();
+            let in_flight_msgs = in_flight_msgs.clone();
             move |transfer_prepare: transfer::TransferPrepareRequestBody, client: Arc<Mutex<mojaloop_api::clients::transfer::Client>>|
-                handle_post_transfers(transfer_prepare, client)
+                handle_post_transfers(transfer_prepare, client, in_flight_msgs.clone(), clients.clone())
         });
 
     // PUT /transfers/{id}/error
@@ -273,40 +275,40 @@ async fn client_message(
         }
     }
 
-    match msg_de {
-        protocol::ClientMessage::CreateSettlement(new_settlement) => {
+    match msg_de.content {
+        protocol::Request::CreateSettlement(new_settlement) => {
             if let Some(client_data) = clients.write().await.get_mut(&client_id) {
                 let create_settlement_req = settlement::PostSettlement { new_settlement };
                 println!("Create settlement request: {:?}", create_settlement_req);
                 let response = moja_clients.settlement.send(create_settlement_req).await?.des().await?;
-                client_data.send(&protocol::ServerMessage::NewSettlementCreated(response));
+                client_data.send(Some(msg_de.id), protocol::Notification::NewSettlementCreated(response));
             } else {
                 // TODO: we should return something to the client indicating an error
                 println!("No client data found for connection!");
             }
         }
 
-        protocol::ClientMessage::GetSettlements(query_params) => {
+        protocol::Request::GetSettlements(query_params) => {
             if let Some(client_data) = clients.write().await.get_mut(&client_id) {
                 let result = moja_clients.settlement.send(query_params).await?.des().await?;
-                client_data.send(&protocol::ServerMessage::Settlements(result));
+                client_data.send(Some(msg_de.id), protocol::Notification::Settlements(result));
             } else {
                 // TODO: we should return something to the client indicating an error
                 println!("No client data found for connection!");
             }
         }
 
-        protocol::ClientMessage::GetSettlementWindows(query_params) => {
+        protocol::Request::GetSettlementWindows(query_params) => {
             if let Some(client_data) = clients.write().await.get_mut(&client_id) {
                 let result = moja_clients.settlement.send(query_params).await?.des().await?;
-                client_data.send(&protocol::ServerMessage::SettlementWindows(result));
+                client_data.send(Some(msg_de.id), protocol::Notification::SettlementWindows(result));
             } else {
                 // TODO: we should return something to the client indicating an error
                 println!("No client data found for connection!");
             }
         }
 
-        protocol::ClientMessage::CloseSettlementWindow(close_msg) => {
+        protocol::Request::CloseSettlementWindow(close_msg) => {
             if let Some(client_data) = clients.write().await.get_mut(&client_id) {
                 let close_req = settlement_windows::CloseSettlementWindow {
                     id: close_msg.id,
@@ -335,7 +337,7 @@ async fn client_message(
                                     close_msg.id,
                                 );
                                 break Ok(
-                                    protocol::ServerMessage::SettlementWindowClosed(close_msg.id)
+                                    protocol::Notification::SettlementWindowClosed(close_msg.id)
                                 );
                             }
                             if n == 10 {
@@ -353,7 +355,7 @@ async fn client_message(
                     }
                     Err(mojaloop_api::clients::Error::MojaloopApiError(ml_err)) => {
                         Ok(
-                            protocol::ServerMessage::SettlementWindowCloseFailed(
+                            protocol::Notification::SettlementWindowCloseFailed(
                                 protocol::SettlementWindowCloseFailedMessage {
                                     id: close_msg.id,
                                     response: ml_err,
@@ -368,7 +370,7 @@ async fn client_message(
                 match close_result {
                     Ok(msg) => {
                         println!("Sending message to client: {:?}", msg);
-                        client_data.send(&msg);
+                        client_data.send(Some(msg_de.id), msg);
                     }
                     Err(msg) => {
                         println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", msg);
@@ -380,7 +382,7 @@ async fn client_message(
             }
         }
 
-        protocol::ClientMessage::CreateHubAccounts(accounts) => {
+        protocol::Request::CreateHubAccounts(accounts) => {
             if let Some(client_data) = clients.write().await.get_mut(&client_id) {
                 for account in &accounts {
                     let create_account_req = participants::PostHubAccount {
@@ -402,14 +404,14 @@ async fn client_message(
                         println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", e);
                     }
                 }
-                client_data.send(&protocol::ServerMessage::HubAccountsCreated(accounts));
+                client_data.send(Some(msg_de.id), protocol::Notification::HubAccountsCreated(accounts));
             } else {
                 // TODO: we should return something to the client indicating an error
                 println!("No client data found for connection!");
             }
         }
 
-        protocol::ClientMessage::CreateParticipants(create_participants_message) => {
+        protocol::Request::CreateParticipants(create_participants_message) => {
             // TODO: it's pretty obvious that the client will want the hub RECONCILIATION accounts
             // and settlement model created. We could probably just do that? If anyone ever doesn't
             // want the hub accounts created first, we'll get a PR.
@@ -470,14 +472,14 @@ async fn client_message(
                     });
                 }
 
-                client_data.send(&protocol::ServerMessage::AssignParticipants(new_participants));
+                client_data.send(Some(msg_de.id), protocol::Notification::AssignParticipants(new_participants));
             } else {
                 // TODO: we should return something to the client indicating an error
                 println!("No client data found for connection!");
             }
         }
 
-        protocol::ClientMessage::Transfers(transfers_message) => {
+        protocol::Request::Transfers(transfers_message) => {
             for transfer in transfers_message.iter() {
                 // TODO: check all transfer preconditions (optionally)? I.e.:
                 //       - hub has correct currency accounts
@@ -514,7 +516,7 @@ async fn client_message(
                 println!("Storing in-flight message {}", transfer.transfer_id);
                 in_flight_msgs.write().await.insert(
                     control_plane::FspiopMessageId::TransferId(transfer.transfer_id),
-                    client_id
+                    (client_id, msg_de.id)
                 );
 
             }
@@ -534,12 +536,12 @@ async fn client_message(
             //   timeout, nonconfigurable at first
         }
 
-        protocol::ClientMessage::CreateSettlementModel(settlement_model) => {
+        protocol::Request::CreateSettlementModel(settlement_model) => {
             if let Some(client_data) = clients.write().await.get_mut(&client_id) {
                 use mojaloop_api::central_ledger::settlement_models;
 
                 let success_response =
-                    protocol::ServerMessage::SettlementModelCreated(
+                    protocol::Notification::SettlementModelCreated(
                         protocol::SettlementModelCreatedMessage {
                             settlement_model: settlement_model.clone()
                         }
@@ -551,7 +553,7 @@ async fn client_message(
 
                 match moja_clients.central_ledger.send(settlement_model_create_req).await {
                     Ok(_) => {
-                        client_data.send(&success_response);
+                        client_data.send(Some(msg_de.id), success_response);
                     },
                     Err(fspiox_api::clients::Error::MojaloopApiError(ml_err)) => {
                         lazy_static! {
@@ -565,7 +567,7 @@ async fn client_message(
                             // existed". At the time of writing, ignoring this case is
                             // desirable, however this is certainly not the general case, and
                             // this should be handled, and an error returned to the client.
-                            client_data.send(&success_response);
+                            client_data.send(Some(msg_de.id), success_response);
                         } else {
                             println!("Whoopsie. TODO: let client know there was a problem. The problem: {:?}", ml_err);
                         }
