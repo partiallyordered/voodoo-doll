@@ -78,18 +78,15 @@ pub async fn create(
 
     async fn create_resource<T>(
         api: kube::Api<T>,
-        // client: kube::Client,
         res_json: serde_json::Value,
     ) -> Result<()>
         where
             T: k8s_openapi::Metadata<Ty = ObjectMeta> + Clone + serde::de::DeserializeOwned + std::fmt::Debug + serde::Serialize
     {
-        // let api = get_api::<T>(client, namespace);
         let res = serde_json::from_value(res_json.clone()).unwrap();
         api.create(
             &PostParams::default(),
             &res,
-        // ).await.map_err(|e| Error::KubernetesResourceCreation(e.to_string())).and(Ok(()))
         ).await.map_err(|e| Error::KubernetesResourceCreation(format!("Attempting to create:\n{:?}\n{:?}", res_json, e.to_string()))).and(Ok(()))
     }
 
@@ -127,21 +124,32 @@ pub async fn create(
     // Wait until the pod is running
     let lp = ListParams::default()
         .fields(format!("metadata.name={}", &consts::POD_NAME).as_str())
+        .disable_bookmarks() // not sure what we'd need this for; docs here: https://kubernetes.io/docs/reference/using-api/api-concepts/#watch-bookmarks
         .timeout(30);
     let mut stream = Box::pin(pod_api.watch(&lp, "0").await.map_err(|e| Error::PodConnect(e.to_string()))?);
+    // TODO: we don't inform the user about the status of the pod- what if it doesn't start? I.e.
+    // what if the image cannot be pulled, or similar?
+    let mut result: String = "Timed out".to_string();
     while let Some(status) = stream.try_next().await.map_err(|e| Error::PodConnect(e.to_string()))? {
         match status {
             WatchEvent::Added(o) => {
-                println!("Added {}", o.name());
+                println!("Added {} pod. Waiting for ready.", o.name());
             }
             WatchEvent::Modified(o) => {
                 let s = o.status.as_ref().expect("status exists on pod");
-                if s.phase.clone().unwrap_or_default() == "Running" {
+                result = s.phase.clone().unwrap_or_default().to_string();
+                if result == "Running" {
                     break;
                 }
             }
-            _ => {}
+            x => {
+                result = format!("Unexpected event received while waiting for pod: {:?}", x);
+                break;
+            }
         }
+    }
+    if result != "Running" {
+        println!("Pod failed to start. Current status: {}.", result);
     }
     Ok(())
 }
@@ -153,23 +161,44 @@ pub async fn destroy(
 ) -> Result<()> {
     use k8s_openapi::api::core::v1::ServiceAccount;
     use k8s_openapi::api::rbac::v1::{ClusterRole, ClusterRoleBinding};
+
+    fn ignore_missing(e: kube::Error) -> Result<()> {
+        match e {
+            kube::Error::Api(api_err) => {
+                if api_err.code == 404 {
+                    Ok(())
+                } else {
+                    Err(Error::KubernetesResourceDestruction(api_err.to_string()))
+                }
+            }
+            x => Err(Error::KubernetesResourceDestruction(x.to_string()))
+        }
+    }
+
     let client = match client {
         Some(c) => c,
         None => kube::Client::try_default().await
             .map_err(|e| Error::KubeClientCreation(e.to_string()))?
     };
     let dp = DeleteParams::default();
-    // TODO: try_join returns the first error; however, it's possible we'll fail to destroy more
-    // than a single resource. We should inform the user of *every* resource we fail to destroy.
+
     let pod_api = get_api::<Pod>(client.clone(), namespace);
     let sa_api = get_api::<ServiceAccount>(client.clone(), namespace);
-    let cr_api = get_api::<ClusterRole>(client.clone(), namespace);
-    let crb_api = get_api::<ClusterRoleBinding>(client.clone(), namespace);
-    tokio::try_join!(
+    let cr_api = Api::<ClusterRole>::all(client.clone());
+    let crb_api = Api::<ClusterRoleBinding>::all(client.clone());
+
+    let (pod, sa, cr, crb) = tokio::join!(
         pod_api.delete(consts::POD_NAME, &dp),
         sa_api.delete(consts::SERVICEACCOUNT_NAME, &dp),
         cr_api.delete(consts::ROLE_NAME, &dp),
         crb_api.delete(consts::ROLEBINDING_NAME, &dp),
-    ).map_err(|e| Error::KubernetesResourceDestruction(e.to_string()))?;
+    );
+    // TODO: it's possible we'll fail to destroy more than a single resource. We should inform the
+    // user of *every* resource we fail to destroy.
+    pod.and(Ok(())).or_else(ignore_missing)?;
+    sa.and(Ok(())).or_else(ignore_missing)?;
+    cr.and(Ok(())).or_else(ignore_missing)?;
+    crb.and(Ok(())).or_else(ignore_missing)?;
+
     Ok(())
 }
