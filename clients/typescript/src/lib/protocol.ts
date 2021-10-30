@@ -1,9 +1,9 @@
 export interface TransferCompleteMessage {
-  id: string;
+  id: TransferId;
 }
 
 export interface TransferErrorMessage {
-  id: string;
+  id: TransferId;
   response: ErrorResponse;
 }
 
@@ -23,7 +23,7 @@ export interface TransferMessage {
   msg_recipient: FspId;
   currency: Currency;
   amount: Amount;
-  transfer_id: string;
+  transfer_id: TransferId;
 }
 
 export interface SettlementModelCreatedMessage {
@@ -185,7 +185,7 @@ export type HubAccountType =
   | "HUB_RECONCILIATION";
 
 export interface TransferPrepareRequestBody {
-  transferId: string;
+  transferId: TransferId;
   payeeFsp: FspId;
   payerFsp: FspId;
   amount: Money;
@@ -197,6 +197,8 @@ export interface TransferPrepareRequestBody {
 export type IlpPacket = string;
 
 export type IlpCondition = string;
+
+export type TransferId = string;
 
 export type CorrelationId = string;
 
@@ -471,10 +473,11 @@ export type MojaloopApiError =
   | "5106"
   | "5200"
   | "5300"
-  | "5400";
+  | "5400"
+  | "6000";
 
 export type Request =
-  | { type: "Transfers"; value: TransferMessage[] }
+  | { type: "Transfer"; value: TransferMessage }
   | { type: "CreateHubAccounts"; value: HubAccount[] }
   | { type: "CreateParticipants"; value: AccountInitialization[] }
   | { type: "CreateSettlementModel"; value: SettlementModel }
