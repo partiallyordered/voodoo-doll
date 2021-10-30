@@ -56,8 +56,8 @@ pub struct ClientMessage {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", content = "value")]
 pub enum Request {
-    /// Run end-to-end transfers
-    Transfers(Vec<TransferMessage>),
+    /// Run an end-to-end transfer
+    Transfer(TransferMessage),
     /// Create hub settlement and reconciliation accounts
     CreateHubAccounts(Vec<participants::HubAccount>),
     // TODO: this _could_ be a vector of vectors of accounts. Each 0th-level vector would represent
@@ -180,6 +180,7 @@ export! {
     transfer::TransferPrepareRequestBody,
     transfer::IlpPacket,
     transfer::IlpCondition,
+    transfer::TransferId,
     CorrelationId,
     Money,
     FspId,

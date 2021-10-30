@@ -479,47 +479,44 @@ async fn client_message(
             }
         }
 
-        protocol::Request::Transfers(transfers_message) => {
-            for transfer in transfers_message.iter() {
-                // TODO: check all transfer preconditions (optionally)? I.e.:
-                //       - hub has correct currency accounts
-                //       - sender and recipient are active
-                //       - sender exists, has correct, active currency accounts, has sufficient liquidity
-                //       - recipient exists, has correct, active currency accounts
+        protocol::Request::Transfer(transfer) => {
+            // TODO: check all transfer preconditions (optionally)? I.e.:
+            //       - hub has correct currency accounts
+            //       - sender and recipient are active
+            //       - sender exists, has correct, active currency accounts, has sufficient liquidity
+            //       - recipient exists, has correct, active currency accounts
 
-                // TODO: restore FSP endpoints afterward
-                for participant in [&transfer.msg_recipient, &transfer.msg_sender].iter() {
-                    println!("Overriding endpoints for {}", participant);
-                    use strum::IntoEnumIterator;
-                    for callback_type in participants::FspiopCallbackType::iter() {
-                        let request = participants::PostCallbackUrl {
-                            name: **participant,
-                            callback_type,
-                            // TODO: strip trailing slash
-                            hostname: my_address.clone(),
-                        };
-                        moja_clients.central_ledger.send(request).await?;
-                        println!("Updated {:?} endpoint to {}.", callback_type, my_address.clone());
-                    }
+            // TODO: restore FSP endpoints afterward
+            for participant in [&transfer.msg_recipient, &transfer.msg_sender].iter() {
+                println!("Overriding endpoints for {}", participant);
+                use strum::IntoEnumIterator;
+                for callback_type in participants::FspiopCallbackType::iter() {
+                    let request = participants::PostCallbackUrl {
+                        name: **participant,
+                        callback_type,
+                        // TODO: strip trailing slash
+                        hostname: my_address.clone(),
+                    };
+                    moja_clients.central_ledger.send(request).await?;
+                    println!("Updated {:?} endpoint to {}.", callback_type, my_address.clone());
                 }
-
-                // Send the transfer prepare, we'll receive it on our POST /transfers soon enough..
-                let req_post_transfer = transfer::TransferPrepareRequest::new(
-                        transfer.msg_sender.clone(),
-                        transfer.msg_recipient.clone(),
-                        transfer.amount,
-                        transfer.currency,
-                        Some(transfer.transfer_id),
-                );
-                moja_clients.transfer.send(req_post_transfer).await?;
-
-                println!("Storing in-flight message {}", transfer.transfer_id);
-                in_flight_msgs.write().await.insert(
-                    control_plane::FspiopMessageId::TransferId(transfer.transfer_id),
-                    (client_id, msg_de.id)
-                );
-
             }
+
+            // Send the transfer prepare, we'll receive it on our POST /transfers soon enough..
+            let req_post_transfer = transfer::TransferPrepareRequest::new(
+                    transfer.msg_sender.clone(),
+                    transfer.msg_recipient.clone(),
+                    transfer.amount,
+                    transfer.currency,
+                    Some(transfer.transfer_id),
+            );
+            moja_clients.transfer.send(req_post_transfer).await?;
+
+            println!("Storing in-flight message {}", transfer.transfer_id);
+            in_flight_msgs.write().await.insert(
+                control_plane::FspiopMessageId::TransferId(transfer.transfer_id),
+                (client_id, msg_de.id)
+            );
 
             // 1. hijack the appropriate participants
             //    - participants might not exist- we should require they exist, to begin with
