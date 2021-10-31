@@ -24,10 +24,26 @@ let
     dontFixup = true;
   };
 
+  skaffold = nixpkgs.stdenv.mkDerivation rec {
+    version = "1.28.0";
+    pname = "skaffold";
+    src = builtins.fetchurl {
+      url = "https://github.com/GoogleContainerTools/skaffold/releases/download/v1.28.0/skaffold-linux-amd64";
+      sha256 = "1aiggw0b8655mzzf57xv079vzgfj4k3xwlr7l48y2pvbzy46f0mg";
+    };
+    dontUnpack = true;
+    installPhase = ''
+      mkdir -p $out/bin
+      cp $src $out/bin/skaffold
+      chmod +x $out/bin/skaffold
+      '';
+  };
+
 in
 
 [
   nixpkgs.kustomize
   nixpkgs.kubectl
   k3d
+  skaffold
 ]
