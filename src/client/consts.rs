@@ -94,6 +94,10 @@ lazy_static! {
                         "fieldPath": "status.podIP"
                       }
                     }
+                  },
+                  {
+                    "name": "RUST_BACKTRACE",
+                    "value": "1"
                   }
                 ]
               }
