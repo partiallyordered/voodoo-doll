@@ -15,11 +15,11 @@ tokio-stream = { version = "0.1.6" }
 hyper = "0.14"
 warp = "0.3"
 futures = "0.3"
-fspiox-api = { git = "https://github.com/partiallyordered/fspiox-api", rev = "a306cf57c11f11b60d3bad8cd89c61b1c03fce69", features = ["fsp_http", "typescript_types"] }
+fspiox-api = { git = "https://github.com/partiallyordered/fspiox-api", rev = "ccb8894962b1dfa85fc850f3537e219ff8ddd973", features = ["fsp_http", "typescript_types"] }
 # fspiox-api = { path = "/home/msk/projects/github.com/msk-/fspiox-api/", features = ["fsp_http", "typescript_types"] }
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
-mojaloop-api = { git = "https://github.com/partiallyordered/mojaloop-api", rev = "3b6157fa4a48d097cadf0fcd56b6ef625cc6690d", features = ["typescript_types", "clients-kube"] }
+mojaloop-api = { git = "https://github.com/partiallyordered/mojaloop-api", rev = "fb19f2eb3e424f92dd7b8eed205a9b9f304b5cbe", features = ["typescript_types", "clients-kube"] }
 # mojaloop-api = { path = "/home/msk/projects/github.com/msk-/mojaloop-api/", features = ["typescript_types", "clients-kube"] }
 thiserror = "1.0"
 strum = "0.21"
@@ -27,7 +27,7 @@ rand = { version = "0.8", features = ["std_rng"] }
 regex = "1.5.4"
 lazy_static = "1.4.0"
 tokio-tungstenite = "0.14"
-kube = { git = "https://github.com/partiallyordered/kube-rs", rev = "46a777178779e6b0895f53ca8202eb7325315230", features = ["ws"] }
+kube = { git = "https://github.com/kazk/kube-rs", rev = "aa58c61612b8e8721779986d511549ca6b5991c4", features = ["ws"] }
 kube-runtime = { version = "0.60.0" }
 k8s-openapi = { version = "0.13.0", default-features = false, features = ["v1_21"] }
 

@@ -97,7 +97,7 @@ lazy_static! {
                   },
                   {
                     "name": "RUST_BACKTRACE",
-                    "value": "1"
+                    "value": "full"
                   }
                 ]
               }
